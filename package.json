@@ -17,7 +17,8 @@
     "prepublish": "npm test && npm run build",
     "standard": "standard src/ test/",
     "tape": "tape test/**/*.js",
-    "test": "npm run standard && npm run tape"
+    "test": "npm run standard && npm run tape",
+    "mocha": "mocha test/**/*.spec.js"
   },
   "repository": {
     "type": "git",
@@ -49,7 +50,9 @@
   "devDependencies": {
     "babel-cli": "^6.26.0",
     "babel-preset-env": "^1.7.0",
-    "rdflib": "^0.17.0",
+    "chai": "^4.2.0",
+    "mocha": "^6.2.0",
+    "rdflib": "^1.0.4",
     "sinon": "^6.0.1",
     "solid-web-client": "0.3.2",
     "standard": "^11.0.1",

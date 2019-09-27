@@ -273,13 +273,13 @@ class PermissionSet {
     if (!this.resourceUrl) {
       throw new Error('Cannot add a permission to a PermissionSet with no resourceUrl')
     }
-    var perm = new Permission(this.resourceUrl, this.isPermInherited())
-    perm.setAgent(webId)
-    perm.addMode(accessMode)
+    const permission = new Permission(this.resourceUrl, this.isPermInherited())
+    permission.setAgent(webId)
+    permission.addMode(accessMode)
     if (origin) {
-      perm.addOrigin(origin)
+      permission.addOrigin(origin)
     }
-    this.addSinglePermission(perm)
+    this.addSinglePermission(permission)
     return this
   }
 

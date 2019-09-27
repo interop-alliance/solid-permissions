@@ -32,7 +32,7 @@ class Permission {
      * @property accessModes
      * @type {Object}
      */
-    this.accessModes = {}
+    this.accessModes = new Set()
     /**
      * Type of permission, either for a specific resource ('accessTo'),
      * or to be inherited by all downstream resources ('default')
@@ -119,10 +119,10 @@ class Permission {
    * @return {Permission} Returns self, chainable.
    */
   addMode (accessMode) {
-    if (Array.isArray(accessMode)) {
-      accessMode.forEach(ea => {
-        this.addModeSingle(ea)
-      })
+    if (Array.isArray(accessMode) || accessMode instanceof Set) {
+      for (let mode of accessMode) {
+        this.addModeSingle(mode)
+      }
     } else {
       this.addModeSingle(accessMode)
     }
@@ -134,13 +134,13 @@ class Permission {
    * @method addModeSingle
    * @private
    * @param accessMode {String|Statement} Access mode as either a uri, or an RDF
-   *   statement.
+   *   statement (quad).
    */
   addModeSingle (accessMode) {
     if (typeof accessMode !== 'string') {
       accessMode = accessMode.object.value
     }
-    this.accessModes[ accessMode ] = true
+    this.accessModes.add(accessMode)
     return this
   }
 
@@ -189,7 +189,7 @@ class Permission {
    * @return {Array<String>}
    */
   allModes () {
-    return Object.keys(this.accessModes)
+    return Array.from(this.accessModes)
   }
 
   /**
@@ -213,7 +213,7 @@ class Permission {
     if (accessMode === acl.APPEND) {
       return this.allowsAppend() // Handle the Append special case
     }
-    return this.accessModes[accessMode]
+    return this.accessModes.has(accessMode)
   }
   /**
    * Does this permission grant access to requests coming from given origin?
@@ -231,7 +231,7 @@ class Permission {
    * @return {Boolean}
    */
   allowsRead () {
-    return this.accessModes[ acl.READ ]
+    return this.accessModes.has(acl.READ)
   }
 
   /**
@@ -240,7 +240,7 @@ class Permission {
    * @return {Boolean}
    */
   allowsWrite () {
-    return this.accessModes[ acl.WRITE ]
+    return this.accessModes.has(acl.WRITE)
   }
 
   /**
@@ -249,7 +249,7 @@ class Permission {
    * @return {Boolean}
    */
   allowsAppend () {
-    return this.accessModes[ acl.APPEND ] || this.accessModes[ acl.WRITE ]
+    return this.accessModes.has(acl.APPEND) || this.accessModes.has(acl.WRITE)
   }
 
   /**
@@ -258,7 +258,7 @@ class Permission {
    * @return {Boolean}
    */
   allowsControl () {
-    return this.accessModes[ acl.CONTROL ]
+    return this.accessModes.has(acl.CONTROL)
   }
 
   /**
@@ -281,25 +281,25 @@ class Permission {
    *   - Contain the same `mailto:` agent aliases.
    *   - Has the same allowed origins
    * @method equals
-   * @param perm {Permission}
+   * @param other {Permission}
    * @return {Boolean}
    */
-  equals (perm) {
-    let sameAgent = this.agent === perm.agent
-    let sameGroup = this.group === perm.group
-    let sameUrl = this.resourceUrl === perm.resourceUrl
-    let myModeKeys = Object.keys(this.accessModes)
-    let permModeKeys = Object.keys(perm.accessModes)
-    let sameNumberModes = myModeKeys.length === permModeKeys.length
-    let sameInherit =
-      JSON.stringify(this.inherited) === JSON.stringify(perm.inherited)
+  equals (other) {
+    const sameAgent = this.agent === other.agent
+    const sameGroup = this.group === other.group
+    const sameUrl = this.resourceUrl === other.resourceUrl
+    const myModeKeys = Array.from(this.accessModes)
+    const permModeKeys = Array.from(other.accessModes)
+    const sameNumberModes = myModeKeys.length === permModeKeys.length
+    const sameInherit =
+      JSON.stringify(this.inherited) === JSON.stringify(other.inherited)
     let sameModes = true
-    myModeKeys.forEach((key) => {
-      if (!perm.accessModes[ key ]) { sameModes = false }
+    myModeKeys.forEach(mode => {
+      if (!other.accessModes.has(mode)) { sameModes = false }
     })
-    let sameMailTos = JSON.stringify(this.mailTo) === JSON.stringify(perm.mailTo)
-    let sameOrigins =
-      JSON.stringify(this.originsAllowed) === JSON.stringify(perm.originsAllowed)
+    const sameMailTos = JSON.stringify(this.mailTo) === JSON.stringify(other.mailTo)
+    const sameOrigins =
+      JSON.stringify(this.originsAllowed) === JSON.stringify(other.originsAllowed)
     return sameAgent && sameGroup && sameUrl && sameNumberModes && sameModes &&
       sameInherit && sameMailTos && sameOrigins
   }
@@ -337,7 +337,7 @@ class Permission {
    * @return {Boolean}
    */
   isEmpty () {
-    return Object.keys(this.accessModes).length === 0
+    return this.accessModes.size === 0
   }
 
   /**
@@ -388,15 +388,15 @@ class Permission {
    * Merges the access modes of a given permission with the access modes of
    * this one (Set union).
    * @method mergeWith
-   * @param perm
+   * @param other
    * @throws {Error} Error if the other permission is for a different webId
    *   or resourceUrl (`acl:accessTo`)
    */
-  mergeWith (perm) {
-    if (this.hashFragment() !== perm.hashFragment()) {
+  mergeWith (other) {
+    if (this.hashFragment() !== other.hashFragment()) {
       throw new Error('Cannot merge permissions with different agent id or resource url (accessTo)')
     }
-    for (var accessMode in perm.accessModes) {
+    for (const accessMode in other.accessModes.values()) {
       this.addMode(accessMode)
     }
   }
@@ -448,7 +448,7 @@ class Permission {
     statement = rdf.triple(fragment, ns.acl('accessTo'),
       rdf.namedNode(this.resourceUrl))
     statements.push(statement)
-    let modes = Object.keys(this.accessModes)
+    const modes = Array.from(this.accessModes)
     modes.forEach((accessMode) => {
       statement = rdf.triple(fragment, ns.acl('mode'), rdf.namedNode(accessMode))
       statements.push(statement)
@@ -494,7 +494,7 @@ class Permission {
     if (typeof accessMode !== 'string') {
       accessMode = accessMode.object.value
     }
-    delete this.accessModes[ accessMode ]
+    this.accessModes.delete(accessMode)
   }
 
   /**
