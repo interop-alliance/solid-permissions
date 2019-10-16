@@ -16,9 +16,10 @@
     "postversion": "git push --follow-tags",
     "prepublish": "npm test && npm run build",
     "standard": "standard src/ test/",
-    "tape": "tape test/**/*.js",
+    "tape": "tape test/**/*-test.js",
     "test": "npm run standard && npm run tape",
-    "mocha": "mocha test/**/*.spec.js"
+    "mocha": "mocha test/**/*.spec.js",
+    "nyc": "nyc --reporter=html mocha test/**/*.spec.js"
   },
   "repository": {
     "type": "git",
@@ -52,6 +53,7 @@
     "babel-preset-env": "^1.7.0",
     "chai": "^4.2.0",
     "mocha": "^6.2.1",
+    "nyc": "^14.1.1",
     "rdflib": "^1.0.4",
     "sinon": "^7.5.0",
     "solid-web-client": "0.3.2",
