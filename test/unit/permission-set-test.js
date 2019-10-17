@@ -32,28 +32,6 @@ before('init graph', t => {
     })
 })
 
-test('a new PermissionSet()', function (t) {
-  let ps = new PermissionSet()
-  t.ok(ps.isEmpty(), 'should be empty')
-  t.equal(ps.count, 0, 'should have a count of 0')
-  t.notOk(ps.resourceUrl, 'should have a null resource url')
-  t.notOk(ps.aclUrl, 'should have a null acl url')
-  t.deepEqual(ps.allPermissions(), [])
-  t.notOk(ps.hasGroups(), 'should have no group perms')
-  t.end()
-})
-
-test('a new PermissionSet() for a resource', function (t) {
-  let ps = new PermissionSet(resourceUrl)
-  t.ok(ps.isEmpty(), 'should be empty')
-  t.equal(ps.count, 0, 'should have a count of 0')
-  t.equal(ps.resourceUrl, resourceUrl)
-  t.notOk(ps.aclUrl, 'An acl url should be set explicitly')
-  t.equal(ps.resourceType, PermissionSet.RESOURCE,
-    'A permission set should be for a resource by default (not container)')
-  t.end()
-})
-
 test('PermissionSet can add and remove agent permissions', function (t) {
   let ps = new PermissionSet(resourceUrl, aclUrl)
   t.equal(ps.aclUrl, aclUrl)
@@ -150,38 +128,7 @@ test('a PermissionSet() for a resource (not container)', function (t) {
 })
 
 test('a PermissionSet can be initialized from an .acl graph', function (t) {
-  let isContainer = false
-  // see test/resources/acl-container-ttl.js
-  let ps = new PermissionSet(resourceUrl, aclUrl, isContainer,
-    { graph: parsedAclGraph, rdf })
 
-  // Check to make sure Alice's permissions were read in correctly
-  let perm = ps.findPermByAgent(aliceWebId, resourceUrl)
-  t.ok(perm, 'Alice should have a permission for /docs/file1')
-  t.ok(perm.isInherited())
-  t.ok(perm.allowsWrite() && perm.allowsWrite() && perm.allowsControl())
-  // Check to make sure the acl:origin objects were read in
-  t.ok(perm.allowsOrigin('https://example.com/'))
-  // Check to make sure the `mailto:` agent objects were read in
-  // This is @private / unofficial functionality, used only in the root ACL
-  t.ok(perm.mailTo.length > 0, 'Alice agent should have a mailto: set')
-  t.equal(perm.mailTo[0], 'alice@example.com')
-  t.equal(perm.mailTo[1], 'bob@example.com')
-  // Check to make sure Bob's permissions were read in correctly
-  let perm2 = ps.findPermByAgent(bobWebId, resourceUrl)
-  t.ok(perm2, 'Container acl should also have an permission for Bob')
-  t.ok(perm2.isInherited())
-  t.ok(perm2.allowsWrite() && perm2.allowsWrite() && perm2.allowsControl())
-  t.ok(perm2.mailTo.length > 0, 'Bob agent should have a mailto: set')
-  t.equal(perm2.mailTo[0], 'alice@example.com')
-  t.equal(perm2.mailTo[1], 'bob@example.com')
-  // // Now check that the Public Read permission was parsed
-  let publicResource = 'https://alice.example.com/profile/card'
-  let publicPerm = ps.findPublicPerm(publicResource)
-  t.ok(publicPerm.isPublic())
-  t.notOk(publicPerm.isInherited())
-  t.ok(publicPerm.allowsRead())
-  t.end()
 })
 
 test('PermissionSet equals test 1', function (t) {
@@ -262,39 +209,6 @@ test('PermissionSet allowsPublic() test', function (t) {
   t.end()
 })
 
-test('allowsPublic() should ignore origin checking', function (t) {
-  let origin = 'https://example.com'
-  let options = { graph: parsedAclGraph, rdf, origin, strictOrigin: true }
-  var ps = new PermissionSet(containerUrl, containerAclUrl,
-    PermissionSet.CONTAINER, options)
-  let otherUrl = 'https://alice.example.com/profile/card'
-  t.ok(ps.allowsPublic(acl.READ, otherUrl))
-
-  ps.checkAccess(otherUrl, 'https://alice.example.com', acl.READ)
-    .then(hasAccess => {
-      t.ok(hasAccess)
-      t.end()
-    })
-})
-
-test('PermissionSet init from untyped ACL test', function (t) {
-  let rawAclSource = require('../resources/untyped-acl-ttl')
-  let resourceUrl = 'https://alice.example.com/docs/file1'
-  let aclUrl = 'https://alice.example.com/docs/file1.acl'
-  let isContainer = false
-  parseGraph(rdf, aclUrl, rawAclSource)
-    .then(graph => {
-      let ps = new PermissionSet(resourceUrl, aclUrl, isContainer,
-        { graph, rdf })
-      t.ok(ps.count,
-        'Permission set should init correctly without acl:Authorization type')
-      t.end()
-    })
-    .catch(err => {
-      console.log(err)
-      t.fail(err)
-    })
-})
 
 test('PermissionSet serialize() no rdf test', t => {
   let ps = new PermissionSet()
@@ -404,13 +318,13 @@ test('PermissionSet groupUris() test', t => {
   let ps = new PermissionSet(resourceUrl)
   ps.addGroupPermission(acl.EVERYONE, acl.READ)
   // By default, groupUris() excludes the Public agentClass
-  t.deepEquals(ps.groupUris(), [])
+  t.deepEquals(ps.groupUrls(), [])
   t.notOk(ps.hasGroups())
   let groupUrl = 'https://alice.example.com/work-groups#Accounting'
   ps.addGroupPermission(groupUrl, acl.WRITE)
-  t.equals(ps.groupUris().length, 1)
+  t.equals(ps.groupUrls().length, 1)
   t.ok(ps.hasGroups())
   let excludePublic = false
-  t.equals(ps.groupUris(excludePublic).length, 2)
+  t.equals(ps.groupUrls(excludePublic).length, 2)
   t.end()
 })

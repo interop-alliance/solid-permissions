@@ -16,11 +16,11 @@
  *     as 'to be inherited', that is will have `acl:default` set.
  */
 
-const Permission = require('./permission')
+const { Permission, SingleAgent, Group, Everyone } = require('./permission')
 const GroupListing = require('./group-listing')
 const { acl } = require('./modes')
 const vocab = require('solid-namespace')
-const debug = require('debug')('solid:permissions')
+const { promisify } = require('util')
 
 const DEFAULT_ACL_SUFFIX = '.acl'
 const DEFAULT_CONTENT_TYPE = 'text/turtle'
@@ -37,6 +37,491 @@ const AGENT_INDEX = 'agents'
 const GROUP_INDEX = 'groups'
 
 class PermissionSet {
+  /**
+   * @param resourceUrl {string}
+   * @param aclUrl {string}
+   * @param isContainer {boolean}
+   * @param rdf {RDF}
+   * @param [permissions={}]{object} Hashmap of all Permissions in this
+   *   permission set, keyed by a hashed combination of an agent's/group's webId
+   *   and the resourceUrl.
+   */
+  constructor ({ resourceUrl, aclUrl, isContainer = false, rdf, index, permissions = {} } = {}) {
+    this.resourceUrl = resourceUrl
+    this.aclUrl = aclUrl || aclUrlFor(resourceUrl)
+    this.isContainer = isContainer
+    this.rdf = rdf
+    this.permissions = permissions
+    this.index = index || {
+      'agents': {}, // Perms by agent webId
+      'groups': {} // Perms by group webId (also includes Public / EVERYONE)
+    }
+    /**
+     * Cache of GroupListing objects, by group webId. Populated by `loadGroups()`.
+     */
+    this.groups = {}
+  }
+
+  /**
+   * Returns the number of Permissions in this permission set.
+   * @returns {number}
+   */
+  get count () {
+    return Object.keys(this.permissions).length
+  }
+
+  /**
+   * Returns whether or not this permission set has any Permissions added to it
+   * @returns {boolean}
+   */
+  get isEmpty () {
+    return this.count === 0
+  }
+
+  /**
+   * Tests whether this permission set has any `acl:agentGroup` permissions
+   * @returns {boolean}
+   */
+  get hasGroups () {
+    return this.groupUrls().length > 0
+  }
+
+  /**
+   * Tests whether the given agent has the specified access to a resource.
+   * This is one of the main use cases for this solid-permissions library.
+   * Optionally performs strict origin checking (if `strictOrigin` is enabled
+   * in the constructor's options).
+   * @param resourceUrl {string}
+   * @param agentId {string}
+   * @param accessMode {string|NamedNode} Access mode (read/write/control etc)
+   * @param [options={}] {object} Passed through to `loadGroups()`.
+   * @param [options.fetchGraph] {Function} Injected, returns a parsed graph of
+   *   a remote document (group listing). Required.
+   * @param [options.rdf] {RDF} RDF library
+   * @throws {Error}
+   * @returns {Promise<boolean>}
+   */
+  async checkAccess (resourceUrl, agentId, accessMode, options = {}) {
+    // First, check to see if there is public access for this mode
+    if (this.allowsPublic(accessMode, resourceUrl)) {
+      return true
+    }
+    // Next, see if there is an individual permission (for a user or a group)
+    if (this.checkAccessForAgent(resourceUrl, agentId, accessMode)) {
+      return true
+    }
+    // If there are no group permissions, no need to proceed
+    if (!this.hasGroups) {
+      return false
+    }
+    // Lastly, load the remote group listings, and check for group perm
+    await this.loadGroups(options)
+    return this.checkGroupAccess(resourceUrl, agentId, accessMode, options)
+  }
+
+  /**
+   * Tests whether this PermissionSet gives Public (acl:agentClass foaf:Agent)
+   * access to a given url.
+   * @param accessMode {string|NamedNode} Access mode (read/write/control etc)
+   * @param resourceUrl {string}
+   * @returns {boolean}
+   */
+  allowsPublic (accessMode, resourceUrl) {
+    resourceUrl = resourceUrl || this.resourceUrl
+    const publicPermission = this.permissionByAgent(
+      acl.EVERYONE, resourceUrl, GROUP_INDEX
+    )
+    if (!publicPermission) {
+      return false
+    }
+    return publicPermission.allowsMode(accessMode)
+  }
+
+  /**
+   * @param resourceUrl {string}
+   * @param agentId {string}
+   * @param accessMode {string} Access mode (read/write/control)
+   *
+   * @throws {Error}
+   *
+   * @returns {boolean}
+   */
+  checkAccessForAgent (resourceUrl, agentId, accessMode) {
+    const permission = this.permissionByAgent(agentId, resourceUrl)
+    return !!permission && permission.allowsMode(accessMode)
+  }
+
+  /**
+   * @param resourceUrl {string}
+   * @param agentId {string}
+   * @param accessMode {string} Access mode (read/write/control)
+   * @param [options={}] {Object}
+   * @param [options.fetchDocument] {Function}
+   * @throws {Error}
+   * @returns {boolean}
+   */
+  checkGroupAccess (resourceUrl, agentId, accessMode, options = {}) {
+    let result = false
+    let membershipMatches = this.groupsForMember(agentId)
+    membershipMatches.find(groupWebId => {
+      debug('Looking for access rights for ' + groupWebId)
+      if (this.checkAccessForAgent(resourceUrl, groupWebId, accessMode)) {
+        debug('Groups access granted for ' + resourceUrl)
+        result = true
+      }
+    })
+    return result
+  }
+
+  /**
+   * Finds and returns a permission (stored in the 'find by agent' index)
+   * for a given agent (web id) and resource.
+   * @param agentId {string}
+   * @param resourceUrl {string}
+   * @param indexName {string}
+   * @return {Permission}
+   */
+  permissionByAgent (agentId, resourceUrl, indexName = AGENT_INDEX) {
+    const index = this.index[indexName]
+    if (!index[agentId]) {
+      // There are no permissions at all for this agent
+      return false
+    }
+    // first check the accessTo type
+    const directPermissions = index[agentId][acl.ACCESS_TO]
+    let directMatch
+    if (directPermissions) {
+      directMatch = directPermissions[resourceUrl]
+    }
+    if (directMatch) {
+      return directMatch
+    }
+    // then check the default/inherited type permissions
+    const inheritedPermissions = index[agentId][acl.DEFAULT]
+    let inheritedMatch
+    if (inheritedPermissions) {
+      // First try an exact match (resource matches the acl:default object)
+      inheritedMatch = inheritedPermissions[resourceUrl]
+      if (!inheritedMatch) {
+        // Next check to see if resource is in any of the relevant containers
+        const containers = Object.keys(inheritedPermissions).sort().reverse()
+        // Loop through the container URLs, sorted in reverse alpha
+        for (const containerUrl of containers) {
+          if (resourceUrl.startsWith(containerUrl)) {
+            inheritedMatch = inheritedPermissions[containerUrl]
+            break
+          }
+        }
+      }
+    }
+    return inheritedMatch
+  }
+
+  /**
+   * Returns a list of all the Permissions that belong to this permission set.
+   * Mostly for internal use.
+   * @return {Array<Permission>}
+   */
+  allPermissions () {
+    return Object.values(this.permissions)
+  }
+
+  /**
+   * Adds a permission for the given access mode and agent id.
+   * @param webId {String} URL of an agent for which this permission applies
+   * @param accessMode {String|Array<String>} One or more access modes
+
+   * @returns {PermissionSet} Returns self (chainable)
+   */
+  addPermission (webId, accessMode) {
+    if (!webId) {
+      throw new Error('addPermission() requires a valid webId')
+    }
+    if (!accessMode) {
+      throw new Error('addPermission() requires a valid accessMode')
+    }
+    if (!this.resourceUrl) {
+      throw new Error('Cannot add a permission to a PermissionSet with no resourceUrl')
+    }
+    const permission = new Permission({
+      resourceUrl: this.resourceUrl,
+      inherit: this.isContainer,
+      agent: new SingleAgent({ webId })
+    })
+    permission.addMode(accessMode)
+    return this.addSinglePermission(permission)
+  }
+
+  /**
+   * Adds a given Permission instance to the permission set.
+   * Low-level function, clients should use `addPermission()` instead, in most
+   * cases.
+   * @param permission {Permission}
+   * @returns {PermissionSet} Returns self (chainable)
+   */
+  addSinglePermission (permission) {
+    const hashFragment = permission.hashFragment()
+    if (hashFragment in this.permissions) {
+      // An permission for this agent and resource combination already exists
+      // Merge the incoming access modes with its existing ones
+      this.permissions[hashFragment].mergeWith(permission)
+    } else {
+      this.permissions[hashFragment] = permission
+    }
+    if (!permission.virtual && permission.allowsControl()) {
+      // If acl:Control is involved, ensure implicit rules for the .acl resource
+      this.addControlPermissionsFor(permission)
+    }
+    // Create the appropriate indexes
+    this.addToIndex(AGENT_INDEX, permission)
+    if (permission.isPublic || permission.isGroup) {
+      this.addToIndex(GROUP_INDEX, permission)
+    }
+    return this
+  }
+
+  /**
+   * Adds a virtual (will not be serialized to RDF) permission giving
+   * Read/Write/Control access to the corresponding ACL resource if acl:Control
+   * is encountered in the actual source ACL.
+   * @param permission {Permission} Containing an acl:Control access mode.
+   */
+  addControlPermissionsFor (permission) {
+    const impliedPermission = permission.clone()
+    impliedPermission.resourceUrl = aclUrlFor(permission.resourceUrl)
+    impliedPermission.virtual = true
+    impliedPermission.addMode(acl.ALL_MODES)
+    this.addSinglePermission(impliedPermission)
+  }
+
+  /**
+   * For each index type (`agents`, `groups`), permissions are indexed
+   * first by `agentId`, then by access type (direct or inherited), and
+   * lastly by resource. For example:
+   *
+   *   ```
+   *   agents: {
+   *     'https://alice.com/#i': {
+   *       accessTo: {
+   *         'https://alice.com/file1': permission1
+   *       },
+   *       default: {
+   *         'https://alice.com/': permission2
+   *       }
+   *     }
+   *   }
+   *   ```
+   * @param indexName {string} AGENT_INDEX or GROUP_INDEX
+   * @param permission
+   */
+  addToIndex (indexName, permission) {
+    const index = this.index[indexName]
+    if (!index[permission.agentId]) {
+      index[permission.agentId] = {}
+    }
+
+    if (!index[permission.agentId][permission.accessType]) {
+      index[permission.agentId][permission.accessType] = {}
+    }
+
+    if (!index[permission.agentId][permission.accessType][permission.resourceUrl]) {
+      index[permission.agentId][permission.accessType][permission.resourceUrl] = permission
+    } else {
+      index[permission.agentId][permission.accessType][permission.resourceUrl]
+        .mergeWith(permission)
+    }
+  }
+
+  /**
+   * Returns a list of URLs of group permissions in this permission set
+   *
+   * @param [excludePublic=true] {boolean} Should agentClass Agent be excluded?
+   *
+   * @returns {Array<string>}
+   */
+  groupUrls ({ excludePublic = true } = {}) {
+    const urls = Object.keys(this.index.groups)
+    if (excludePublic) {
+      return urls.filter(url => url !== acl.EVERYONE)
+    }
+    return urls
+  }
+
+  /**
+   * @param [options={}]
+   * @param [options.fetchGraph] {Function} Injected, returns a parsed graph of
+   *   a remote document (group listing). Required.
+   * @param [options.rdf] {RDF} RDF library
+   * @throws {Error}
+   * @returns {Promise<PermissionSet>} Resolves to self, chainable
+   */
+  async loadGroups ({ fetchGraph, rdf = this.rdf }) {
+    if (!fetchGraph) {
+      throw new Error('Cannot load groups, fetchGraph() not supplied')
+    }
+    const urls = this.groupUrls()
+    const loadActions = urls.map(url => GroupListing.loadFrom(url, fetchGraph, rdf))
+    const groups = await Promise.all(loadActions)
+    groups.forEach(group => {
+      if (group) { this.groups[group.url] = group }
+    })
+    return this
+  }
+
+  /**
+   * Returns a list of webIds of groups to which this agent belongs.
+   * Note: Only checks loaded groups (assumes a previous `loadGroups()` call).
+   * @param agentId {string}
+   * @return {Array<string>}
+   */
+  groupsForMember (agentId) {
+    const loadedGroupIds = Object.keys(this.groups)
+    return loadedGroupIds
+      .filter(groupId => {
+        return this.groups[groupId].hasMember(agentId)
+      })
+  }
+
+  /**
+   * Returns an RDF graph representation of this permission set and all its
+   * Permissions. Used by `save()`.
+   * @param rdf {RDF} RDF Library
+   * @returns {IndexedFormula} graph
+   */
+  buildGraph (rdf = this.rdf) {
+    const graph = rdf.graph()
+    for (const permission of this.allPermissions()) {
+      graph.add(permission.rdfStatements(rdf))
+    }
+    return graph
+  }
+
+  /**
+   * Serializes this permission set (and all its Permissions) to a string RDF
+   * representation (Turtle by default).
+   * Note: invalid authorizations (ones that don't have at least one agent/group,
+   * at least one resourceUrl and at least one access mode) do not get serialized,
+   * and are instead skipped.
+   * @param [contentType='text/turtle'] {string}
+   * @param [rdf] {RDF} RDF Library to serialize with
+   *
+   * @throws {Error} If one is encountered during RDF serialization.
+   *
+   * @return {Promise<string>} Graph serialized to contentType RDF syntax
+   */
+  async serialize ({ contentType = DEFAULT_CONTENT_TYPE, rdf = this.rdf } = {}) {
+    const graph = this.buildGraph(rdf)
+    const target = null
+    const base = this.aclUrl
+
+    try {
+      return promisify(rdf.serialize())(target, graph, base, contentType)
+    } catch (error) {
+      throw new Error(`Error serializing the graph to ${contentType}: ${error}`)
+    }
+  }
+
+  /**
+   * Creates and loads all the permissions from a given RDF graph.
+   * Usage:
+   *
+   *   ```
+   *   const ps = PermissionSet.fromGraph({ target, graph, rdf }
+   *   // or
+   *   const ps = PermissionSet.fromGraph({
+   *     resourceUrl, aclUrl, isContainer, graph, rdf
+   *   })
+   *   ```
+   *
+   * Either `target` or a combination of `resourceUrl`/ `aclUrl`/`isContainer`
+   *   is required.
+   * @param [resourceUrl] {string}
+   * @param [aclUrl] {string}
+   * @param [target] {LdpTarget}
+   * @param [isContainer] {boolean}
+   *
+   * @param graph {IndexedFormula} RDF Graph (parsed from the source ACL)
+   * @param rdf {RDF} RDF library
+   *
+   * @returns {PermissionSet}
+   */
+  static fromGraph ({ resourceUrl, aclUrl, target, isContainer, graph, rdf }) {
+    const ns = vocab(rdf)
+
+    resourceUrl = resourceUrl || (target && target.url)
+    aclUrl = aclUrl || (target && target.aclUrl)
+    isContainer = isContainer || !!(target && target.isContainer)
+
+    const permissionSet = new PermissionSet({
+      resourceUrl, aclUrl, isContainer, rdf
+    })
+
+    const authSections = new Set()
+    for (const match of graph.match(null, ns.acl('mode'))) {
+      authSections.add(match.subject.value)
+    }
+
+    // Iterate through each grouping of authorizations in the .acl graph
+    for (const subject of Array.from(authSections)) {
+      const fragment = graph.sym(subject)
+
+      // Extract the access modes
+      const accessModes = graph.match(fragment, ns.acl('mode'))
+
+      const agentMatches = this.agentMatches({ fragment, graph, ns })
+
+      // Create an Permission object for each agent or group
+      //   (both individual (acl:accessTo) and inherited (acl:default))
+      for (const agent of agentMatches) {
+        // Extract the acl:accessTo statements.
+        const resourceMatches = graph.match(fragment, ns.acl('accessTo'))
+          .map(ea => ea.object.value)
+        for (const resourceUrl of resourceMatches) {
+          const permission = new Permission({ resourceUrl, agent, inherit: false })
+          permission.addMode(accessModes)
+          permissionSet.addSinglePermission(permission)
+        }
+
+        // Extract inherited / acl:default statements
+        const inheritedMatches = graph.match(fragment, ns.acl('default'))
+          .concat(graph.match(fragment, ns.acl('defaultForNew')))
+          .map(ea => ea.object.value)
+        for (const containerUrl of inheritedMatches) {
+          const permission = new Permission({
+            resourceUrl: containerUrl, agent, inherit: true
+          })
+          permission.addMode(accessModes)
+          permissionSet.addSinglePermission(permission)
+        }
+      }
+    }
+
+    return permissionSet
+  }
+
+  static agentMatches ({ fragment, graph, ns }) {
+    // Extract all the authorized agents (minus the mailto: terms)
+    const agentMatches = graph.match(fragment, ns.acl('agent'))
+      .filter(ea => !isMailTo(ea))
+      .map(ea => new SingleAgent({ webId: ea.object.value }))
+
+    // Extract all acl:agentGroup matches
+    const groupMatches = graph.match(fragment, ns.acl('agentGroup'))
+      .map(ea => new GroupListing({ listing: ea }))
+
+    // See if any 'Public' matches (agentClass foaf:Agent)
+    const anyPublicMatches = graph.match(fragment, ns.acl('agentClass'),
+      ns.foaf('Agent')).length > 0
+
+    const allAgents = agentMatches.concat(groupMatches)
+    if (anyPublicMatches) {
+      allAgents.push(new Everyone())
+    }
+    return allAgents
+  }
+}
+
+class OldPermissionSet {
   /**
    * @class PermissionSet
    * @param resourceUrl {String} URL of the resource to which this PS applies
@@ -148,45 +633,15 @@ class PermissionSet {
     this.webClient = options.webClient
 
     // Init the functions for deriving an ACL url for a given resource
-    this.aclUrlFor = options.aclUrlFor ? options.aclUrlFor : defaultAclUrlFor
+    this.aclUrlFor = options.aclUrlFor ? options.aclUrlFor : aclUrlFor
     this.aclUrlFor.bind(this)
-    this.isAcl = options.isAcl ? options.isAcl : defaultIsAcl
+    this.isAcl = options.isAcl ? options.isAcl : isAcl
     this.isAcl.bind(this)
 
     // Optionally initialize from a given parsed graph
     if (options.graph) {
       this.initFromGraph(options.graph)
     }
-  }
-
-  /**
-   * Adds a given Permission instance to the permission set.
-   * Low-level function, clients should use `addPermission()` instead, in most
-   * cases.
-   * @method addSinglePermission
-   * @private
-   * @param perm {Permission}
-   * @return {PermissionSet} Returns self (chainable)
-   */
-  addSinglePermission (perm) {
-    var hashFragment = perm.hashFragment()
-    if (hashFragment in this.permissions) {
-      // An permission for this agent and resource combination already exists
-      // Merge the incoming access modes with its existing ones
-      this.permissions[hashFragment].mergeWith(perm)
-    } else {
-      this.permissions[hashFragment] = perm
-    }
-    if (!perm.virtual && perm.allowsControl()) {
-      // If acl:Control is involved, ensure implicit rules for the .acl resource
-      this.addControlPermissionsFor(perm)
-    }
-    // Create the appropriate indexes
-    this.addToAgentIndex(perm)
-    if (perm.isPublic() || perm.isGroup()) {
-      this.addToGroupIndex(perm)
-    }
-    return this
   }
 
   /**
@@ -221,23 +676,6 @@ class PermissionSet {
   }
 
   /**
-   * Adds a virtual (will not be serialized to RDF) permission giving
-   * Read/Write/Control access to the corresponding ACL resource if acl:Control
-   * is encountered in the actual source ACL.
-   * @method addControlPermissionsFor
-   * @private
-   * @param perm {Permission} Permission containing an acl:Control access
-   *   mode.
-   */
-  addControlPermissionsFor (perm) {
-    let impliedPerm = perm.clone()
-    impliedPerm.resourceUrl = this.aclUrlFor(perm.resourceUrl)
-    impliedPerm.virtual = true
-    impliedPerm.addMode(acl.ALL_MODES)
-    this.addSinglePermission(impliedPerm)
-  }
-
-  /**
    * Adds a group permission for the given access mode and group web id.
    * @method addGroupPermission
    * @param webId {String}
@@ -253,210 +691,6 @@ class PermissionSet {
     perm.addMode(accessMode)
     this.addSinglePermission(perm)
     return this
-  }
-
-  /**
-   * Adds a permission for the given access mode and agent id.
-   * @method addPermission
-   * @param webId {String} URL of an agent for which this permission applies
-   * @param accessMode {String|Array<String>} One or more access modes
-   * @param [origin] {String|Array<String>} One or more allowed origins (optional)
-   * @return {PermissionSet} Returns self (chainable)
-   */
-  addPermission (webId, accessMode, origin) {
-    if (!webId) {
-      throw new Error('addPermission() requires a valid webId')
-    }
-    if (!accessMode) {
-      throw new Error('addPermission() requires a valid accessMode')
-    }
-    if (!this.resourceUrl) {
-      throw new Error('Cannot add a permission to a PermissionSet with no resourceUrl')
-    }
-    const permission = new Permission(this.resourceUrl, this.isPermInherited())
-    permission.setAgent(webId)
-    permission.addMode(accessMode)
-    if (origin) {
-      permission.addOrigin(origin)
-    }
-    this.addSinglePermission(permission)
-    return this
-  }
-
-  /**
-   * Adds a given permission to the "lookup by agent id" index.
-   * Enables lookups via `findPermByAgent()`.
-   * @method addToAgentIndex
-   * @private
-   * @param permission {Permission}
-   */
-  addToAgentIndex (permission) {
-    let webId = permission.webId()
-    let accessType = permission.accessType
-    let resourceUrl = permission.resourceUrl
-    let agents = this.permsBy.agents
-    if (!agents[webId]) {
-      agents[webId] = {}
-    }
-    if (!agents[webId][accessType]) {
-      agents[webId][accessType] = {}
-    }
-    if (!agents[webId][accessType][resourceUrl]) {
-      agents[webId][accessType][resourceUrl] = permission
-    } else {
-      agents[webId][accessType][resourceUrl].mergeWith(permission)
-    }
-  }
-
-  /**
-   * Adds a given permission to the "lookup by group id" index.
-   * Enables lookups via `findPermByAgent()`.
-   * @method addToGroupIndex
-   * @private
-   * @param permission {Permission}
-   */
-  addToGroupIndex (permission) {
-    let webId = permission.webId()
-    let accessType = permission.accessType
-    let resourceUrl = permission.resourceUrl
-    let groups = this.permsBy.groups
-    if (!groups[webId]) {
-      groups[webId] = {}
-    }
-    if (!groups[webId][accessType]) {
-      groups[webId][accessType] = {}
-    }
-    if (!groups[webId][accessType][resourceUrl]) {
-      groups[webId][accessType][resourceUrl] = permission
-    } else {
-      groups[webId][accessType][resourceUrl].mergeWith(permission)
-    }
-  }
-
-  /**
-   * Returns a list of all the Permissions that belong to this permission set.
-   * Mostly for internal use.
-   * @method allPermissions
-   * @return {Array<Permission>}
-   */
-  allPermissions () {
-    var permList = []
-    var perm
-    Object.keys(this.permissions).forEach(permKey => {
-      perm = this.permissions[permKey]
-      permList.push(perm)
-    })
-    return permList
-  }
-
-  /**
-   * Tests whether this PermissionSet gives Public (acl:agentClass foaf:Agent)
-   * access to a given uri.
-   * @method allowsPublic
-   * @param mode {String|NamedNode} Access mode (read/write/control etc)
-   * @param resourceUrl {String}
-   * @return {Boolean}
-   */
-  allowsPublic (mode, resourceUrl) {
-    resourceUrl = resourceUrl || this.resourceUrl
-    let publicPerm = this.findPublicPerm(resourceUrl)
-    if (!publicPerm) {
-      return false
-    }
-    return publicPerm.allowsMode(mode)
-  }
-
-  /**
-   * Returns an RDF graph representation of this permission set and all its
-   * Permissions. Used by `save()`.
-   * @method buildGraph
-   * @private
-   * @param rdf {RDF} RDF Library
-   * @return {Graph}
-   */
-  buildGraph (rdf) {
-    var graph = rdf.graph()
-    this.allPermissions().forEach(function (perm) {
-      graph.add(perm.rdfStatements(rdf))
-    })
-    return graph
-  }
-
-  /**
-   * Tests whether the given agent has the specified access to a resource.
-   * This is one of the main use cases for this solid-permissions library.
-   * Optionally performs strict origin checking (if `strictOrigin` is enabled
-   * in the constructor's options).
-   * @method checkAccess
-   * @param resourceUrl {String}
-   * @param agentId {String}
-   * @param accessMode {String} Access mode (read/write/control)
-   * @param [options={}] {Object} Passed through to `loadGroups()`.
-   * @param [options.fetchGraph] {Function} Injected, returns a parsed graph of
-   *   a remote document (group listing). Required.
-   * @param [options.rdf] {RDF} RDF library
-   * @throws {Error}
-   * @return {Promise<Boolean>}
-   */
-  checkAccess (resourceUrl, agentId, accessMode, options = {}) {
-    debug('Checking access for agent ' + agentId)
-    // First, check to see if there is public access for this mode
-    if (this.allowsPublic(accessMode, resourceUrl)) {
-      debug('Public access allowed for ' + resourceUrl)
-      return Promise.resolve(true)
-    }
-    // Next, see if there is an individual permission (for a user or a group)
-    if (this.checkAccessForAgent(resourceUrl, agentId, accessMode)) {
-      debug('Individual access granted for ' + resourceUrl)
-      return Promise.resolve(true)
-    }
-    // If there are no group permissions, no need to proceed
-    if (!this.hasGroups()) {
-      debug('No groups permissions exist')
-      return Promise.resolve(false)
-    }
-    // Lastly, load the remote group listings, and check for group perm
-    debug('Check groups permissions')
-
-    return this.loadGroups(options)
-      .then(() => {
-        return this.checkGroupAccess(resourceUrl, agentId, accessMode, options)
-      })
-  }
-
-  /**
-   * @param resourceUrl {String}
-   * @param agentId {String}
-   * @param accessMode {String} Access mode (read/write/control)
-   * @throws {Error}
-   * @return {Boolean}
-   */
-  checkAccessForAgent (resourceUrl, agentId, accessMode) {
-    let perm = this.findPermByAgent(agentId, resourceUrl)
-    let result = perm && this.checkOrigin(perm) && perm.allowsMode(accessMode)
-    return result
-  }
-
-  /**
-   * @param resourceUrl {string}
-   * @param agentId {string}
-   * @param accessMode {string} Access mode (read/write/control)
-   * @param [options={}] {Object}
-   * @param [options.fetchDocument] {Function}
-   * @throws {Error}
-   * @return {boolean}
-   */
-  checkGroupAccess (resourceUrl, agentId, accessMode, options = {}) {
-    let result = false
-    let membershipMatches = this.groupsForMember(agentId)
-    membershipMatches.find(groupWebId => {
-      debug('Looking for access rights for ' + groupWebId)
-      if (this.checkAccessForAgent(resourceUrl, groupWebId, accessMode)) {
-        debug('Groups access granted for ' + resourceUrl)
-        result = true
-      }
-    })
-    return result
   }
 
   /**
@@ -515,15 +749,6 @@ class PermissionSet {
   }
 
   /**
-   * Returns the number of Permissions in this permission set.
-   * @method count
-   * @return {Number}
-   */
-  get count () {
-    return Object.keys(this.permissions).length
-  }
-
-  /**
    * Returns whether or not this permission set is equal to another one.
    * A PermissionSet is considered equal to another one iff:
    * - It has the same number of permissions, and each of those permissions
@@ -557,198 +782,6 @@ class PermissionSet {
   }
 
   /**
-   * Finds and returns an permission (stored in the 'find by agent' index)
-   * for a given agent (web id) and resource.
-   * @method findPermByAgent
-   * @private
-   * @param webId {String}
-   * @param resourceUrl {String}
-   * @param indexType {String} Either 'default' or 'accessTo'
-   * @return {Permission}
-   */
-  findPermByAgent (webId, resourceUrl, indexType = AGENT_INDEX) {
-    let index = this.permsBy[indexType]
-    if (!index[webId]) {
-      // There are no permissions at all for this agent
-      return false
-    }
-    // first check the accessTo type
-    let accessToAuths = index[webId][acl.ACCESS_TO]
-    let accessToMatch
-    if (accessToAuths) {
-      accessToMatch = accessToAuths[resourceUrl]
-    }
-    if (accessToMatch) {
-      return accessToMatch
-    }
-    // then check the default/inherited type permissions
-    let defaultAuths = index[webId][acl.DEFAULT]
-    let defaultMatch
-    if (defaultAuths) {
-      // First try an exact match (resource matches the acl:default object)
-      defaultMatch = defaultAuths[resourceUrl]
-      if (!defaultMatch) {
-        // Next check to see if resource is in any of the relevant containers
-        let containers = Object.keys(defaultAuths).sort().reverse()
-        // Loop through the container URLs, sorted in reverse alpha
-        for (let containerUrl of containers) {
-          if (resourceUrl.startsWith(containerUrl)) {
-            defaultMatch = defaultAuths[containerUrl]
-            break
-          }
-        }
-      }
-    }
-    return defaultMatch
-  }
-
-  /**
-   * Finds and returns an permission (stored in the 'find by group' index)
-   * for the "Everyone" group (acl:agentClass foaf:Agent), for a given resource.
-   * @method findPublicPerm
-   * @private
-   * @param resourceUrl {String}
-   * @return {Permission}
-   */
-  findPublicPerm (resourceUrl) {
-    return this.findPermByAgent(acl.EVERYONE, resourceUrl, GROUP_INDEX)
-  }
-
-  /**
-   * Iterates over all the permissions in this permission set.
-   * Convenience method.
-   * Usage:
-   *
-   *   ```
-   *   solid.getPermissions(resourceUrl)
-   *     .then(function (permissionSet) {
-   *       permissionSet.forEach(function (perm) {
-   *         // do stuff with perm
-   *       })
-   *     })
-   *   ```
-   * @method forEach
-   * @param callback {Function} Function to apply to each permission
-   */
-  forEach (callback) {
-    this.allPermissions().forEach(perm => {
-      callback.call(this, perm)
-    })
-  }
-
-  /**
-   * Returns a list of webIds of groups to which this agent belongs.
-   * Note: Only checks loaded groups (assumes a previous `loadGroups()` call).
-   * @param agentId {string}
-   * @return {Array<string>}
-   */
-  groupsForMember (agentId) {
-    let loadedGroupIds = Object.keys(this.groups)
-    return loadedGroupIds
-      .filter(groupWebId => {
-        return this.groups[groupWebId].hasMember(agentId)
-      })
-  }
-
-  /**
-   * Returns a list of URIs of group permissions in this permission set
-   * (those added via addGroupPermission(), etc).
-   * @param [excludePublic=true] {Boolean} Should agentClass Agent be excluded?
-   * @return {Array<string>}
-   */
-  groupUris (excludePublic = true) {
-    let groupIndex = this.permsBy.groups
-    let uris = Object.keys(groupIndex)
-    if (excludePublic) {
-      uris = uris.filter((uri) => { return uri !== acl.EVERYONE })
-    }
-    return uris
-  }
-
-  /**
-   * Tests whether this permission set has any `acl:agentGroup` permissions
-   * @return {Boolean}
-   */
-  hasGroups () {
-    return this.groupUris().length > 0
-  }
-
-  /**
-   * Creates and loads all the permissions from a given RDF graph.
-   * Used by `getPermissions()` and by the constructor (optionally).
-   * Usage:
-   *
-   *   ```
-   *   var acls = new PermissionSet(resourceUri, aclUri, isContainer, {rdf: rdf})
-   *   acls.initFromGraph(graph)
-   *   ```
-   * @method initFromGraph
-   * @param graph {Dataset} RDF Graph (parsed from the source ACL)
-   */
-  initFromGraph (graph) {
-    let ns = vocab(this.rdf)
-    let authSections = graph.match(null, null, ns.acl('Authorization'))
-    if (authSections.length) {
-      authSections = authSections.map(match => { return match.subject })
-    } else {
-      // Attempt to deal with an ACL with no acl:Authorization types present.
-      let subjects = {}
-      authSections = graph.match(null, ns.acl('mode'))
-      authSections.forEach(match => {
-        subjects[match.subject.value] = match.subject
-      })
-      authSections = Object.keys(subjects).map(section => {
-        return subjects[section]
-      })
-    }
-    // Iterate through each grouping of authorizations in the .acl graph
-    authSections.forEach(fragment => {
-      // Extract the access modes
-      let accessModes = graph.match(fragment, ns.acl('mode'))
-      // Extract allowed origins
-      let origins = graph.match(fragment, ns.acl('origin'))
-
-      // Extract all the authorized agents
-      let agentMatches = graph.match(fragment, ns.acl('agent'))
-      // Mailtos only apply to agents (not groups)
-      let mailTos = agentMatches.filter(isMailTo)
-      // Now filter out mailtos
-      agentMatches = agentMatches.filter(ea => { return !isMailTo(ea) })
-      // Extract all 'Public' matches (agentClass foaf:Agent)
-      let publicMatches = graph.match(fragment, ns.acl('agentClass'),
-        ns.foaf('Agent'))
-      // Extract all acl:agentGroup matches
-      let groupMatches = graph.match(fragment, ns.acl('agentGroup'))
-      groupMatches = groupMatches.map(ea => {
-        return new GroupListing({ listing: ea })
-      })
-      // Create an Permission object for each group (accessTo and default)
-      let allAgents = agentMatches
-        .concat(publicMatches)
-        .concat(groupMatches)
-      // Create an Permission object for each agent or group
-      //   (both individual (acl:accessTo) and inherited (acl:default))
-      allAgents.forEach(agentMatch => {
-        // Extract the acl:accessTo statements.
-        let accessToMatches = graph.match(fragment, ns.acl('accessTo'))
-        accessToMatches.forEach(resourceMatch => {
-          let resourceUrl = resourceMatch.object.value
-          this.addPermissionFor(resourceUrl, acl.NOT_INHERIT,
-            agentMatch, accessModes, origins, mailTos)
-        })
-        // Extract inherited / acl:default statements
-        let inheritedMatches = graph.match(fragment, ns.acl('default'))
-          .concat(graph.match(fragment, ns.acl('defaultForNew')))
-        inheritedMatches.forEach(containerMatch => {
-          let containerUrl = containerMatch.object.value
-          this.addPermissionFor(containerUrl, acl.INHERIT,
-            agentMatch, accessModes, origins, mailTos)
-        })
-      })
-    })
-  }
-
-  /**
    * Returns whether or not permissions added to this permission set be
    * inherited, by default? (That is, should they have acl:default set on them).
    * @method isPermInherited
@@ -756,47 +789,6 @@ class PermissionSet {
    */
   isPermInherited () {
     return this.resourceType === CONTAINER
-  }
-
-  /**
-   * Returns whether or not this permission set has any Permissions added to it
-   * @method isEmpty
-   * @return {Boolean}
-   */
-  isEmpty () {
-    return this.count === 0
-  }
-
-  /**
-   * @method loadGroups
-   * @param [options={}]
-   * @param [options.fetchGraph] {Function} Injected, returns a parsed graph of
-   *   a remote document (group listing). Required.
-   * @param [options.rdf] {RDF} RDF library
-   * @throws {Error}
-   * @return {Promise<PermissionSet>} Resolves to self, chainable
-   */
-  loadGroups (options = {}) {
-    let fetchGraph = options.fetchGraph
-    debug('Fetching with ' + fetchGraph)
-    let rdf = options.rdf || this.rdf
-    if (!fetchGraph) {
-      return Promise.reject(new Error('Cannot load groups, fetchGraph() not supplied'))
-    }
-    if (!rdf) {
-      return Promise.reject(new Error('Cannot load groups, rdf library not supplied'))
-    }
-    let uris = this.groupUris()
-    let loadActions = uris.map(uri => {
-      return GroupListing.loadFrom(uri, fetchGraph, rdf, options)
-    })
-    return Promise.all(loadActions)
-      .then(groups => {
-        groups.forEach(group => {
-          if (group) { this.groups[group.uri] = group }
-        })
-        return this
-      })
   }
 
   /**
@@ -882,55 +874,23 @@ class PermissionSet {
         return this.webClient.put(aclUrl, graph, contentType)
       })
   }
-
-  /**
-   * Serializes this permission set (and all its Permissions) to a string RDF
-   * representation (Turtle by default).
-   * Note: invalid authorizations (ones that don't have at least one agent/group,
-   * at least one resourceUrl and at least one access mode) do not get serialized,
-   * and are instead skipped.
-   * @method serialize
-   * @param [options={}] {Object} Options hashmap
-   * @param [options.contentType='text/turtle'] {string}
-   * @param [options.rdf] {RDF} RDF Library to serialize with
-   * @throws {Error} Rejects with an error if one is encountered during RDF
-   *   serialization.
-   * @return {Promise<String>} Graph serialized to contentType RDF syntax
-   */
-  serialize (options = {}) {
-    let contentType = options.contentType || DEFAULT_CONTENT_TYPE
-    let rdf = options.rdf || this.rdf
-    if (!rdf) {
-      return Promise.reject(new Error('Cannot save - no rdf library'))
-    }
-    let graph = this.buildGraph(rdf)
-    let target = null
-    let base = this.aclUrl
-    return new Promise((resolve, reject) => {
-      rdf.serialize(target, graph, base, contentType, (err, result) => {
-        if (err) { return reject(err) }
-        if (!result) {
-          return reject(new Error('Error serializing the graph to ' +
-            contentType))
-        }
-        resolve(result)
-      })
-    })
-  }
 }
 
 /**
- * Returns the corresponding ACL uri, for a given resource.
+ * Returns the corresponding ACL url, for a given resource.
  * This is the default template for the `aclUrlFor()` method that's used by
  * PermissionSet instances, unless it's overridden in options.
- * @param resourceUri {String}
- * @return {String} ACL uri
+ * @param resourceUrl {string}
+ * @returns {string} ACL url
  */
-function defaultAclUrlFor (resourceUri) {
-  if (defaultIsAcl(resourceUri)) {
-    return resourceUri // .acl resources are their own ACLs
+function aclUrlFor (resourceUrl) {
+  if (!resourceUrl) {
+    return undefined
+  }
+  if (isAcl(resourceUrl)) {
+    return resourceUrl // .acl resources are their own ACLs
   } else {
-    return resourceUri + DEFAULT_ACL_SUFFIX
+    return resourceUrl + DEFAULT_ACL_SUFFIX
   }
 }
 
@@ -942,7 +902,7 @@ function defaultAclUrlFor (resourceUri) {
  * @param uri {String}
  * @return {Boolean}
  */
-function defaultIsAcl (uri) {
+function isAcl (uri) {
   return uri.endsWith(DEFAULT_ACL_SUFFIX)
 }
 
@@ -960,6 +920,11 @@ function isMailTo (agent) {
   }
 }
 
-PermissionSet.RESOURCE = RESOURCE
-PermissionSet.CONTAINER = CONTAINER
-module.exports = PermissionSet
+module.exports = {
+  PermissionSet,
+  isAcl,
+  aclUrlFor,
+  isMailTo
+}
+
+

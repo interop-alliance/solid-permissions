@@ -14,4 +14,6 @@ function parseGraph (rdf, baseUrl, rdfSource, contentType = 'text/turtle') {
   })
 }
 
-module.exports.parseGraph = parseGraph
+module.exports = {
+  parseGraph
+}
