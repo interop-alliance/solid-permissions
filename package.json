@@ -53,7 +53,7 @@
     "dirty-chai": "^2.0.1",
     "mocha": "^6.2.1",
     "nyc": "^14.1.1",
-    "rdflib": "0.19.1",
+    "rdflib": "interop-alliance/rdflib-lite#rc2.0.0",
     "sinon": "^7.5.0",
     "solid-web-client": "0.3.2",
     "standard": "^14.3.1",
