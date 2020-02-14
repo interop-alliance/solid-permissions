@@ -43,7 +43,7 @@
   },
   "homepage": "https://github.com/solid/solid-permissions",
   "dependencies": {
-    "solid-namespace": "0.2.0",
+    "solid-namespace": "0.3.0",
     "debug": "^4.1.1"
   },
   "devDependencies": {
@@ -51,13 +51,12 @@
     "babel-preset-env": "^1.7.0",
     "chai": "^4.2.0",
     "dirty-chai": "^2.0.1",
-    "mocha": "^6.2.1",
-    "nyc": "^14.1.1",
+    "mocha": "^7.0.1",
+    "nyc": "^15.0.0",
     "rdflib": "interop-alliance/rdflib-lite#rc2.0.0",
-    "sinon": "^7.5.0",
+    "sinon": "^8.1.1",
     "solid-web-client": "0.3.2",
-    "standard": "^14.3.1",
-    "tape": "^4.9.1"
+    "standard": "^14.3.1"
   },
   "standard": {
     "globals": []

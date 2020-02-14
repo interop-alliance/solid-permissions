@@ -1,3 +1,7 @@
+/**
+ * NOTE: Test suite transitioned from Test to Mocha.
+ * This is left here only for reference purposes, will be deleted soon.
+ */
 'use strict'
 
 const test = require('tape')
