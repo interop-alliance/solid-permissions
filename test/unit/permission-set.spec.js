@@ -16,7 +16,7 @@ const aclUrl = 'https://alice.example.com/docs/file1.acl'
 
 const groupListingSource = require('../resources/group-listing-ttl')
 const listingUrl = 'https://alice.example.com/work-groups'
-const groupUrl = listingUrl + '#Accounting'
+// const groupUrl = listingUrl + '#Accounting'
 
 const bobWebId = 'https://bob.example.com/#me'
 const aliceWebId = 'https://alice.example.com/#me'
@@ -24,7 +24,7 @@ const aliceWebId = 'https://alice.example.com/#me'
 const { parseGraph } = require('./utils')
 
 const rawAclSource = require('../resources/acl-container-ttl')
-let parsedAclGraph, parsedGroupListing
+let parsedAclGraph, parsedAclGraph2, parsedGroupListing
 
 before(async () => {
   parsedAclGraph = await parseGraph(rdf, aclUrl, rawAclSource)
@@ -83,6 +83,40 @@ describe('PermissionSet', () => {
       expect(publicPermission.isPublic).to.be.true()
       expect(publicPermission).to.exist()
       expect(publicPermission.inherit).to.be.false()
+    })
+  })
+
+  describe('serialize()', () => {
+    it('can serialize round trip', async () => {
+      const aclUrl = 'https://localhost:8443/public/.acl'
+      const resourceUrl = 'https://localhost:8443/public/'
+      parsedAclGraph2 = await parseGraph(rdf, aclUrl, require('../resources/acl-container-ttl2'))
+      const ps = PermissionSet.fromGraph({
+        resourceUrl,
+        aclUrl,
+        isContainer: true,
+        graph: parsedAclGraph2
+      })
+
+      const serialized = await ps.serialize()
+      expect(serialized.length > 10).to.be.true()
+
+      const newGraph = await parseGraph(rdf, aclUrl, serialized)
+
+      const ps2 = PermissionSet.fromGraph({
+        resourceUrl: 'https://localhost:8443/public/',
+        aclUrl,
+        isContainer: true,
+        graph: newGraph
+      })
+
+      const owner = 'https://localhost:8443/web#id'
+      const randomUser = 'https://someone.else.com/'
+      expect(await ps2.checkAccess(resourceUrl, randomUser, acl.READ))
+        .to.be.true('Should be public read')
+
+      expect(await ps2.checkAccess(resourceUrl, owner, acl.CONTROL))
+        .to.be.true('Should be owner control')
     })
   })
 

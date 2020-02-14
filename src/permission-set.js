@@ -21,6 +21,7 @@ const GroupListing = require('./group-listing')
 const { acl } = require('./modes')
 const vocab = require('solid-namespace')
 const { promisify } = require('util')
+const rdflib = require('rdflib')
 
 const DEFAULT_ACL_SUFFIX = '.acl'
 const DEFAULT_CONTENT_TYPE = 'text/turtle'
@@ -46,7 +47,7 @@ class PermissionSet {
    *   permission set, keyed by a hashed combination of an agent's/group's webId
    *   and the resourceUrl.
    */
-  constructor ({ resourceUrl, aclUrl, isContainer = false, rdf, index, permissions = {} } = {}) {
+  constructor ({ resourceUrl, aclUrl, isContainer = false, rdf = rdflib, index, permissions = {} } = {}) {
     this.resourceUrl = resourceUrl
     this.aclUrl = aclUrl || aclUrlFor(resourceUrl)
     this.isContainer = isContainer
@@ -409,13 +410,13 @@ class PermissionSet {
    *
    * @return {Promise<string>} Graph serialized to contentType RDF syntax
    */
-  async serialize ({ contentType = DEFAULT_CONTENT_TYPE, rdf = this.rdf } = {}) {
+  async serialize ({ contentType = DEFAULT_CONTENT_TYPE, rdf = rdflib } = {}) {
     const graph = this.buildGraph(rdf)
     const target = null
     const base = this.aclUrl
 
     try {
-      return promisify(rdf.serialize())(target, graph, base, contentType)
+      return promisify(rdf.serialize)(target, graph, base, contentType)
     } catch (error) {
       throw new Error(`Error serializing the graph to ${contentType}: ${error}`)
     }
@@ -445,7 +446,7 @@ class PermissionSet {
    *
    * @returns {PermissionSet}
    */
-  static fromGraph ({ resourceUrl, aclUrl, target, isContainer, graph, rdf }) {
+  static fromGraph ({ resourceUrl, aclUrl, target, isContainer, graph, rdf = rdflib }) {
     const ns = vocab(rdf)
 
     resourceUrl = resourceUrl || (target && target.url)
