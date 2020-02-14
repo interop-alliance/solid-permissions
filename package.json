@@ -1,9 +1,6 @@
 {
   "name": "solid-permissions",
   "version": "0.6.0",
-  "engines": {
-    "node": "^8.10"
-  },
   "description": "Web Access Control based permissions library",
   "main": "./src/index",
   "files": [
