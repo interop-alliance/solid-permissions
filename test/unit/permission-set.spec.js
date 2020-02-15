@@ -141,83 +141,99 @@ describe('PermissionSet', () => {
       expect(await ps.checkAccess(containerUrl, 'https://someone.else.com/', acl.WRITE))
         .to.be.false('Another user should have no write access')
     })
-  })
 
-  it('should check for inherited access', async () => {
-    const containerUrl = 'https://alice.example.com/docs/'
-    const ps = new PermissionSet({ resourceUrl: containerUrl, isContainer: true })
+    it('should check for inherited access', async () => {
+      const containerUrl = 'https://alice.example.com/docs/'
+      const ps = new PermissionSet({ resourceUrl: containerUrl, isContainer: true })
 
-    // Now add a default / inherited permission for the container
-    ps.addPermission(aliceWebId, acl.READ)
+      // Now add a default / inherited permission for the container
+      ps.addPermission(aliceWebId, acl.READ)
 
-    const resourceUrl = 'https://alice.example.com/docs/file1'
-    const result = await ps.checkAccess(resourceUrl, aliceWebId, acl.READ)
-    expect(result).to.be.true('Alice should have inherited read access to file')
+      const resourceUrl = 'https://alice.example.com/docs/file1'
+      const result = await ps.checkAccess(resourceUrl, aliceWebId, acl.READ)
+      expect(result).to.be.true('Alice should have inherited read access to file')
 
-    expect(await ps.checkAccess(resourceUrl, 'https://someone.else.com/', acl.READ))
-      .to.be.false('Another user should not have inherited access to file')
-  })
-
-  it('should check for public access', async () => {
-    const containerUrl = 'https://alice.example.com/docs/'
-    const ps = new PermissionSet({ resourceUrl: containerUrl, isContainer: true })
-
-    // First, let's test an inherited allow public read permission
-    const permission1 = new Permission({
-      resourceUrl: containerUrl,
-      inherit: true,
-      agent: new Everyone()
-    })
-    permission1.addMode(acl.READ)
-    ps.addSinglePermission(permission1)
-
-    // See if this file has inherited access
-    const resourceUrl = 'https://alice.example.com/docs/file1'
-    const randomUser = 'https://someone.else.com/'
-    expect(await ps.checkAccess(resourceUrl, randomUser, acl.READ))
-      .to.be.true('Everyone should have inherited read access to file')
-
-
-    // Reset the permission set, test a non-default permission
-    const set2 = new PermissionSet({ resourceUrl, isContainer: false })
-    const permission2 = new Permission({
-      resourceUrl,
-      inherit: false,
-      agent: new Everyone()
-    })
-    permission2.addMode(acl.READ)
-    set2.addSinglePermission(permission1)
-
-    expect(await set2.checkAccess(resourceUrl, randomUser, acl.READ))
-      .to.be.true('Everyone should have non-inherited read access to file')
-  })
-
-  it.skip('should check access for remote Group Listings', async () => {
-    const groupAclSource = require('../resources/acl-with-group-ttl')
-    const resourceUrl = 'https://alice.example.com/docs/file2.ttl'
-    const aclUrl = 'https://alice.example.com/docs/file2.ttl.acl'
-
-    const ps = PermissionSet.fromGraph({
-      resourceUrl, aclUrl, isContainer: false, graph: parsedGroupListing, rdf
+      expect(await ps.checkAccess(resourceUrl, 'https://someone.else.com/', acl.READ))
+        .to.be.false('Another user should not have inherited access to file')
     })
 
-    const fetchGraph = sinon.stub().resolves(parsedGroupListing)
-    let options = { fetchGraph }
+    it('should check for public access', async () => {
+      const containerUrl = 'https://alice.example.com/docs/'
+      const ps = new PermissionSet({ resourceUrl: containerUrl, isContainer: true })
 
-    let bob = 'https://bob.example.com/profile/card#me'
-    let isContainer = false
+      // First, let's test an inherited allow public read permission
+      const permission1 = new Permission({
+        resourceUrl: containerUrl,
+        inherit: true,
+        agent: new Everyone()
+      })
+      permission1.addMode(acl.READ)
+      ps.addSinglePermission(permission1)
 
-  //   const ps = new PermissionSet(resourceUrl, aclUrl, isContainer, { rdf })
+      // See if this file has inherited access
+      const resourceUrl = 'https://alice.example.com/docs/file1'
+      const randomUser = 'https://someone.else.com/'
+      expect(await ps.checkAccess(resourceUrl, randomUser, acl.READ))
+        .to.be.true('Everyone should have inherited read access to file')
+
+
+      // Reset the permission set, test a non-default permission
+      const set2 = new PermissionSet({ resourceUrl, isContainer: false })
+      const permission2 = new Permission({
+        resourceUrl,
+        inherit: false,
+        agent: new Everyone()
+      })
+      permission2.addMode(acl.READ)
+      set2.addSinglePermission(permission1)
+
+      expect(await set2.checkAccess(resourceUrl, randomUser, acl.READ))
+        .to.be.true('Everyone should have non-inherited read access to file')
+    })
+  })
+
+  describe('add/remove permission', () => {
+    it('should add and remove permission', async () => {
+      const ps = new PermissionSet({ resourceUrl })
+
+      ps.addPermission(aliceWebId, [acl.READ, acl.WRITE])
+
+      expect(await ps.checkAccess(resourceUrl, aliceWebId, acl.WRITE))
+        .to.be.true()
+
+      ps.removePermission(aliceWebId, acl.WRITE)
+
+      expect(await ps.checkAccess(resourceUrl, aliceWebId, acl.WRITE))
+        .to.be.false()
+    })
+  })
+
+  // it.skip('should check access for remote Group Listings', async () => {
+  //   const groupAclSource = require('../resources/acl-with-group-ttl')
+  //   const resourceUrl = 'https://alice.example.com/docs/file2.ttl'
+  //   const aclUrl = 'https://alice.example.com/docs/file2.ttl.acl'
   //
-  //   parseGraph(rdf, aclUrl, groupAclSource)
-  //     .then(graph => {
-  //       ps.initFromGraph(graph)
-  //       return ps.checkAccess(resourceUrl, bob, acl.WRITE, options)
-  //     })
-  //     .then(hasAccess => {
-  //       // External group listings have now been loaded/resolved
-  //       t.ok(fetchGraph.calledWith(groupUri, options))
-  //       t.ok(hasAccess, 'Bob should have access as member of group')
-  })
+  //   const ps = PermissionSet.fromGraph({
+  //     resourceUrl, aclUrl, isContainer: false, graph: parsedGroupListing, rdf
+  //   })
+  //
+  //   const fetchGraph = sinon.stub().resolves(parsedGroupListing)
+  //   let options = { fetchGraph }
+  //
+  //   let bob = 'https://bob.example.com/profile/card#me'
+  //   let isContainer = false
+  //
+  // //   const ps = new PermissionSet(resourceUrl, aclUrl, isContainer, { rdf })
+  // //
+  // //   parseGraph(rdf, aclUrl, groupAclSource)
+  // //     .then(graph => {
+  // //       ps.initFromGraph(graph)
+  // //       return ps.checkAccess(resourceUrl, bob, acl.WRITE, options)
+  // //     })
+  // //     .then(hasAccess => {
+  // //       // External group listings have now been loaded/resolved
+  // //       t.ok(fetchGraph.calledWith(groupUri, options))
+  // //       t.ok(hasAccess, 'Bob should have access as member of group')
+  // })
 })
 

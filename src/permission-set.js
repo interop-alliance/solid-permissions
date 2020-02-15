@@ -282,6 +282,46 @@ class PermissionSet {
   }
 
   /**
+   * Removes one or more access modes from an permission in this permission set
+   * (defined by a unique combination of agent/group id (webId) and a resourceUrl).
+   * If no more access modes remain for that permission, it's deleted from the
+   * permission set.
+   * @method removePermission
+   * @param webId
+   * @param accessMode {String|Array<String>}
+   * @return {PermissionSet} Returns self (chainable function)
+   */
+  removePermission (webId, accessMode) {
+    const permission = this.permissionByAgent(webId, this.resourceUrl)
+    if (!permission) {
+      // No permission for this webId + resourceUrl exists. Bail.
+      return this
+    }
+    // Permission exists, remove the accessMode from it
+    permission.removeMode(accessMode)
+    if (permission.isEmpty) {
+      // If no more access modes remain, after removing, delete it from this
+      // permission set
+      this.removeSinglePermission(permission)
+    }
+    return this
+  }
+
+  /**
+   * Deletes a given Permission instance from the permission set.
+   * Low-level function, clients should use `removePermission()` instead, in most
+   * cases.
+   * @method removeSinglePermission
+   * @param perm {Permission}
+   * @return {PermissionSet} Returns self (chainable)
+   */
+  removeSinglePermission (perm) {
+    var hashFragment = perm.hashFragment()
+    delete this.permissions[hashFragment]
+    return this
+  }
+
+  /**
    * Adds a virtual (will not be serialized to RDF) permission giving
    * Read/Write/Control access to the corresponding ACL resource if acl:Control
    * is encountered in the actual source ACL.
@@ -809,46 +849,6 @@ class OldPermissionSet {
     resourceUrl = resourceUrl || this.resourceUrl
     var hashFragment = Permission.hashFragmentFor(webId, resourceUrl)
     return this.permissions[hashFragment]
-  }
-
-  /**
-   * Deletes a given Permission instance from the permission set.
-   * Low-level function, clients should use `removePermission()` instead, in most
-   * cases.
-   * @method removeSinglePermission
-   * @param perm {Permission}
-   * @return {PermissionSet} Returns self (chainable)
-   */
-  removeSinglePermission (perm) {
-    var hashFragment = perm.hashFragment()
-    delete this.permissions[hashFragment]
-    return this
-  }
-
-  /**
-   * Removes one or more access modes from an permission in this permission set
-   * (defined by a unique combination of agent/group id (webId) and a resourceUrl).
-   * If no more access modes remain for that permission, it's deleted from the
-   * permission set.
-   * @method removePermission
-   * @param webId
-   * @param accessMode {String|Array<String>}
-   * @return {PermissionSet} Returns self (via a chainable function)
-   */
-  removePermission (webId, accessMode) {
-    var perm = this.permissionFor(webId, this.resourceUrl)
-    if (!perm) {
-      // No permission for this webId + resourceUrl exists. Bail.
-      return this
-    }
-    // Permission exists, remove the accessMode from it
-    perm.removeMode(accessMode)
-    if (perm.isEmpty()) {
-      // If no more access modes remain, after removing, delete it from this
-      // permission set
-      this.removeSinglePermission(perm)
-    }
-    return this
   }
 
   /**
