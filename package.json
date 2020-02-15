@@ -1,14 +1,12 @@
 {
-  "name": "solid-permissions",
-  "version": "0.6.0",
+  "name": "@interop/solid-permissions",
+  "version": "0.9.0",
   "description": "Web Access Control based permissions library",
   "main": "./src/index",
   "files": [
-    "lib",
     "src"
   ],
   "scripts": {
-    "build": "babel src -d lib",
     "preversion": "npm test",
     "postversion": "git push --follow-tags",
     "standard": "standard src/ test/",
@@ -44,8 +42,6 @@
     "debug": "^4.1.1"
   },
   "devDependencies": {
-    "babel-cli": "^6.26.0",
-    "babel-preset-env": "^1.7.0",
     "chai": "^4.2.0",
     "dirty-chai": "^2.0.1",
     "mocha": "^7.0.1",
