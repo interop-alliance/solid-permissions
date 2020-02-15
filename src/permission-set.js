@@ -42,8 +42,8 @@ class PermissionSet {
    * @param resourceUrl {string}
    * @param aclUrl {string}
    * @param isContainer {boolean}
-   * @param rdf {RDF}
-   * @param [permissions={}]{object} Hashmap of all Permissions in this
+   * @param rdf {RDF} rdflib library
+   * @param [permissions={}] {object} Hashmap of all Permissions in this
    *   permission set, keyed by a hashed combination of an agent's/group's webId
    *   and the resourceUrl.
    */
@@ -54,8 +54,8 @@ class PermissionSet {
     this.rdf = rdf
     this.permissions = permissions
     this.index = index || {
-      'agents': {}, // Perms by agent webId
-      'groups': {} // Perms by group webId (also includes Public / EVERYONE)
+      'agents': {}, // Permissions by agent webId
+      'groups': {} // Permissions by group webId (also includes Public/EVERYONE)
     }
     /**
      * Cache of GroupListing objects, by group webId. Populated by `loadGroups()`.
@@ -228,46 +228,45 @@ class PermissionSet {
   }
 
   /**
-   * Adds a permission for the given access mode and agent id.
-   * @param webId {String} URL of an agent for which this permission applies
-   * @param accessMode {String|Array<String>} One or more access modes
-
+   * Adds an access mode to the permission for an agent id.
+   * @param agentId {string} URL of an agent for which this permission applies
+   * @param accessMode {string|Array<String>} One or more access modes
+   * @param [inherit] {boolean} Determines access type (default/accessTo)
+   *
    * @returns {PermissionSet} Returns self (chainable)
    */
-  addPermission (webId, accessMode) {
-    if (!webId) {
-      throw new Error('addPermission() requires a valid webId')
+  addMode ({agentId, accessMode, inherit = this.isContainer}) {
+    if (!agentId) {
+      throw new Error('addPermission() requires a valid webId.')
     }
     if (!accessMode) {
-      throw new Error('addPermission() requires a valid accessMode')
+      throw new Error('addPermission() requires a valid accessMode.')
     }
     if (!this.resourceUrl) {
-      throw new Error('Cannot add a permission to a PermissionSet with no resourceUrl')
+      throw new Error('Cannot add a permission to a PermissionSet with no resourceUrl.')
     }
     const permission = new Permission({
       resourceUrl: this.resourceUrl,
-      inherit: this.isContainer,
-      agent: new SingleAgent({ webId })
+      inherit,
+      agent: new SingleAgent({ webId: agentId })
     })
     permission.addMode(accessMode)
-    return this.addSinglePermission(permission)
+    return this.addPermission(permission)
   }
 
   /**
    * Adds a given Permission instance to the permission set.
-   * Low-level function, clients should use `addPermission()` instead, in most
-   * cases.
    * @param permission {Permission}
    * @returns {PermissionSet} Returns self (chainable)
    */
-  addSinglePermission (permission) {
-    const hashFragment = permission.hashFragment()
-    if (hashFragment in this.permissions) {
+  addPermission (permission) {
+    const id = permission.id
+    if (id in this.permissions) {
       // An permission for this agent and resource combination already exists
       // Merge the incoming access modes with its existing ones
-      this.permissions[hashFragment].mergeWith(permission)
+      this.permissions[id].mergeWith(permission)
     } else {
-      this.permissions[hashFragment] = permission
+      this.permissions[id] = permission
     }
     if (!permission.virtual && permission.allowsControl()) {
       // If acl:Control is involved, ensure implicit rules for the .acl resource
@@ -283,18 +282,17 @@ class PermissionSet {
 
   /**
    * Removes one or more access modes from an permission in this permission set
-   * (defined by a unique combination of agent/group id (webId) and a resourceUrl).
+   * (defined by a unique combination of agent/group id and a resourceUrl).
    * If no more access modes remain for that permission, it's deleted from the
    * permission set.
-   * @method removePermission
-   * @param webId
+   * @param agentId
    * @param accessMode {String|Array<String>}
    * @return {PermissionSet} Returns self (chainable function)
    */
-  removePermission (webId, accessMode) {
-    const permission = this.permissionByAgent(webId, this.resourceUrl)
+  removeMode (agentId, accessMode) {
+    const permission = this.permissionByAgent(agentId, this.resourceUrl)
     if (!permission) {
-      // No permission for this webId + resourceUrl exists. Bail.
+      // No permission for this agentId + resourceUrl exists. Bail.
       return this
     }
     // Permission exists, remove the accessMode from it
@@ -302,22 +300,24 @@ class PermissionSet {
     if (permission.isEmpty) {
       // If no more access modes remain, after removing, delete it from this
       // permission set
-      this.removeSinglePermission(permission)
+      this.removePermission(permission)
     }
     return this
   }
 
   /**
    * Deletes a given Permission instance from the permission set.
-   * Low-level function, clients should use `removePermission()` instead, in most
-   * cases.
-   * @method removeSinglePermission
-   * @param perm {Permission}
+   *
+   * @param permission {Permission}
    * @return {PermissionSet} Returns self (chainable)
    */
-  removeSinglePermission (perm) {
-    var hashFragment = perm.hashFragment()
-    delete this.permissions[hashFragment]
+  removePermission (permission) {
+    delete this.permissions[permission.id]
+
+    this.removeFromIndex(AGENT_INDEX, permission)
+    if (permission.isPublic || permission.isGroup) {
+      this.removeFromIndex(GROUP_INDEX, permission)
+    }
     return this
   }
 
@@ -332,7 +332,7 @@ class PermissionSet {
     impliedPermission.resourceUrl = aclUrlFor(permission.resourceUrl)
     impliedPermission.virtual = true
     impliedPermission.addMode(acl.ALL_MODES)
-    this.addSinglePermission(impliedPermission)
+    this.addPermission(impliedPermission)
   }
 
   /**
@@ -371,6 +371,20 @@ class PermissionSet {
       index[permission.agentId][permission.accessType][permission.resourceUrl]
         .mergeWith(permission)
     }
+  }
+
+  removeFromIndex (indexName, permission) {
+    const index = this.index[indexName]
+    if (!index) {
+      return
+    }
+
+    if (!index[permission.agentId] ||
+        !index[permission.agentId][permission.accessType]) {
+      return
+    }
+
+    delete index[permission.agentId][permission.accessType][permission.resourceUrl]
   }
 
   /**
@@ -432,7 +446,9 @@ class PermissionSet {
   buildGraph (rdf = this.rdf) {
     const graph = rdf.graph()
     for (const permission of this.allPermissions()) {
-      graph.add(permission.rdfStatements(rdf))
+      if(!permission.virtual) {
+        graph.add(permission.rdfStatements(rdf))
+      }
     }
     return graph
   }
@@ -520,7 +536,7 @@ class PermissionSet {
         for (const resourceUrl of resourceMatches) {
           const permission = new Permission({ resourceUrl, agent, inherit: false })
           permission.addMode(accessModes)
-          permissionSet.addSinglePermission(permission)
+          permissionSet.addPermission(permission)
         }
 
         // Extract inherited / acl:default statements
@@ -532,7 +548,7 @@ class PermissionSet {
             resourceUrl: containerUrl, agent, inherit: true
           })
           permission.addMode(accessModes)
-          permissionSet.addSinglePermission(permission)
+          permissionSet.addPermission(permission)
         }
       }
     }
@@ -836,7 +852,7 @@ class OldPermissionSet {
    * Returns the corresponding Permission for a given agent/group webId (and
    * for a given resourceUrl, although it assumes by default that it's the same
    * resourceUrl as the PermissionSet).
-   * @method permissionFor
+   *
    * @param webId {String} URL of the agent or group
    * @param [resourceUrl] {String}
    * @return {Permission} Returns the corresponding Permission, or `null`
@@ -847,8 +863,8 @@ class OldPermissionSet {
       return null
     }
     resourceUrl = resourceUrl || this.resourceUrl
-    var hashFragment = Permission.hashFragmentFor(webId, resourceUrl)
-    return this.permissions[hashFragment]
+    const id = Permission.idFor(webId, resourceUrl)
+    return this.permissions[id]
   }
 
   /**

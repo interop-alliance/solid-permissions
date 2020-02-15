@@ -99,6 +99,7 @@ describe('PermissionSet', () => {
       })
 
       const serialized = await ps.serialize()
+
       expect(serialized.length > 10).to.be.true()
 
       const newGraph = await parseGraph(rdf, aclUrl, serialized)
@@ -124,7 +125,7 @@ describe('PermissionSet', () => {
     it('should check for Append access', async () => {
       const ps = new PermissionSet({ resourceUrl })
 
-      ps.addPermission(aliceWebId, acl.WRITE)
+      ps.addMode({agentId: aliceWebId, accessMode: acl.WRITE})
 
       const result = await ps.checkAccess(resourceUrl, aliceWebId, acl.APPEND)
       expect(result).to.be.true('Alice should have Append access implied by Write access')
@@ -133,7 +134,7 @@ describe('PermissionSet', () => {
     it('should check for accessTo resource', async () => {
       const containerUrl = 'https://alice.example.com/docs/'
       const ps = new PermissionSet({ resourceUrl: containerUrl })
-      ps.addPermission(aliceWebId, [acl.READ, acl.WRITE])
+      ps.addMode({agentId: aliceWebId, accessMode: [acl.READ, acl.WRITE]})
 
       const result = await ps.checkAccess(containerUrl, aliceWebId, acl.WRITE)
       expect(result).to.be.true('Alice should have write access to container')
@@ -147,7 +148,7 @@ describe('PermissionSet', () => {
       const ps = new PermissionSet({ resourceUrl: containerUrl, isContainer: true })
 
       // Now add a default / inherited permission for the container
-      ps.addPermission(aliceWebId, acl.READ)
+      ps.addMode({agentId: aliceWebId, accessMode: acl.READ})
 
       const resourceUrl = 'https://alice.example.com/docs/file1'
       const result = await ps.checkAccess(resourceUrl, aliceWebId, acl.READ)
@@ -168,7 +169,7 @@ describe('PermissionSet', () => {
         agent: new Everyone()
       })
       permission1.addMode(acl.READ)
-      ps.addSinglePermission(permission1)
+      ps.addPermission(permission1)
 
       // See if this file has inherited access
       const resourceUrl = 'https://alice.example.com/docs/file1'
@@ -185,7 +186,7 @@ describe('PermissionSet', () => {
         agent: new Everyone()
       })
       permission2.addMode(acl.READ)
-      set2.addSinglePermission(permission1)
+      set2.addPermission(permission1)
 
       expect(await set2.checkAccess(resourceUrl, randomUser, acl.READ))
         .to.be.true('Everyone should have non-inherited read access to file')
@@ -193,15 +194,31 @@ describe('PermissionSet', () => {
   })
 
   describe('add/remove permission', () => {
-    it('should add and remove permission', async () => {
+    it('should add and remove modes', async () => {
       const ps = new PermissionSet({ resourceUrl })
 
-      ps.addPermission(aliceWebId, [acl.READ, acl.WRITE])
+      ps.addMode({agentId: aliceWebId, accessMode: [acl.READ, acl.WRITE]})
 
       expect(await ps.checkAccess(resourceUrl, aliceWebId, acl.WRITE))
         .to.be.true()
 
-      ps.removePermission(aliceWebId, acl.WRITE)
+      ps.removeMode(aliceWebId, acl.WRITE)
+
+      expect(await ps.checkAccess(resourceUrl, aliceWebId, acl.WRITE))
+        .to.be.false()
+    })
+
+    it('should remove whole permissions', async () => {
+      const ps = new PermissionSet({ resourceUrl })
+
+      ps.addMode({agentId: aliceWebId, accessMode: [acl.READ, acl.WRITE]})
+
+      expect(await ps.checkAccess(resourceUrl, aliceWebId, acl.WRITE))
+        .to.be.true()
+
+      const permission = ps.permissionByAgent(aliceWebId, resourceUrl)
+
+      ps.removePermission(permission)
 
       expect(await ps.checkAccess(resourceUrl, aliceWebId, acl.WRITE))
         .to.be.false()

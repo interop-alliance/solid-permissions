@@ -38,8 +38,8 @@
   },
   "homepage": "https://github.com/solid/solid-permissions",
   "dependencies": {
-    "solid-namespace": "0.3.0",
-    "debug": "^4.1.1"
+    "debug": "^4.1.1",
+    "solid-namespace": "0.3.0"
   },
   "devDependencies": {
     "chai": "^4.2.0",

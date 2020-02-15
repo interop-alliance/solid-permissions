@@ -42,8 +42,8 @@ test('PermissionSet can add and remove agent permissions', function (t) {
   let origin = 'https://example.com/'
   // Notice that addPermission() is chainable:
   ps
-    .addPermission(bobWebId, acl.READ, origin) // only allow read from origin
-    .addPermission(aliceWebId, [acl.READ, acl.WRITE])
+    .addMode(bobWebId, acl.READ, origin) // only allow read from origin
+    .addMode(aliceWebId, [acl.READ, acl.WRITE])
   t.notOk(ps.isEmpty())
   t.equal(ps.count, 2)
   let perm = ps.permissionFor(bobWebId)
@@ -54,14 +54,14 @@ test('PermissionSet can add and remove agent permissions', function (t) {
   t.ok(perm.allowsRead())
   t.notOk(perm.allowsWrite())
   // adding further permissions for an existing agent just merges access modes
-  ps.addPermission(bobWebId, acl.WRITE)
+  ps.addMode(bobWebId, acl.WRITE)
   // should still only be 2 permissions
   t.equal(ps.count, 2)
   perm = ps.permissionFor(bobWebId)
   t.ok(perm.allowsWrite())
 
   // Now remove the added permission
-  ps.removePermission(bobWebId, acl.READ)
+  ps.removeMode(bobWebId, acl.READ)
   // Still 2 permissions, agent1 has a WRITE permission remaining
   t.equal(ps.count, 2)
   perm = ps.permissionFor(bobWebId)
@@ -70,7 +70,7 @@ test('PermissionSet can add and remove agent permissions', function (t) {
 
   // Now, if you remove the remaining WRITE permission from agent1, that whole
   // permission is removed
-  ps.removePermission(bobWebId, acl.WRITE)
+  ps.removeMode(bobWebId, acl.WRITE)
   t.equal(ps.count, 1, 'Only one permission should remain')
   t.notOk(ps.permissionFor(bobWebId),
     'No permission for agent1 should be found')
@@ -80,8 +80,8 @@ test('PermissionSet can add and remove agent permissions', function (t) {
 test('PermissionSet no duplicate permissions test', function (t) {
   let ps = new PermissionSet(resourceUrl, aclUrl)
   // Now add two identical permissions
-  ps.addPermission(aliceWebId, [acl.READ, acl.WRITE])
-  ps.addPermission(aliceWebId, [acl.READ, acl.WRITE])
+  ps.addMode(aliceWebId, [acl.READ, acl.WRITE])
+  ps.addMode(aliceWebId, [acl.READ, acl.WRITE])
   t.equal(ps.count, 1, 'Duplicate permissions should be eliminated')
   t.end()
 })
@@ -93,7 +93,7 @@ test('PermissionSet can add and remove group permissions', function (t) {
   t.equal(ps.count, 1)
   let perm = ps.permissionFor(groupWebId)
   t.equal(perm.group, groupWebId)
-  ps.removePermission(groupWebId, [acl.READ, acl.WRITE])
+  ps.removeMode(groupWebId, [acl.READ, acl.WRITE])
   t.ok(ps.isEmpty())
   t.end()
 })
@@ -101,8 +101,8 @@ test('PermissionSet can add and remove group permissions', function (t) {
 test('iterating over a PermissionSet', function (t) {
   let ps = new PermissionSet(resourceUrl, aclUrl)
   ps
-    .addPermission(bobWebId, acl.READ)
-    .addPermission(aliceWebId, [acl.READ, acl.WRITE])
+    .addMode(bobWebId, acl.READ)
+    .addMode(aliceWebId, [acl.READ, acl.WRITE])
   ps.forEach(function (perm) {
     t.ok(perm.hashFragment() in ps.permissions)
   })
@@ -114,7 +114,7 @@ test.skip('a PermissionSet() for a container', function (t) {
   let ps = new PermissionSet(containerUrl, aclUrl, isContainer)
   t.ok(ps.isPermInherited(),
     'A PermissionSet for a container should be inherited by default')
-  ps.addPermission(bobWebId, acl.READ)
+  ps.addMode(bobWebId, acl.READ)
   let perm = ps.permissionFor(bobWebId)
   t.ok(perm.isInherited(),
     'An permission intended for a container should be inherited by default')
@@ -124,7 +124,7 @@ test.skip('a PermissionSet() for a container', function (t) {
 test('a PermissionSet() for a resource (not container)', function (t) {
   let ps = new PermissionSet(containerUrl)
   t.notOk(ps.isPermInherited())
-  ps.addPermission(bobWebId, acl.READ)
+  ps.addMode(bobWebId, acl.READ)
   let perm = ps.permissionFor(bobWebId)
   t.notOk(perm.isInherited(),
     'An permission intended for a resource should not be inherited by default')
@@ -168,10 +168,10 @@ test('PermissionSet equals test 3', function (t) {
 
 test('PermissionSet equals test 4', function (t) {
   let ps1 = new PermissionSet(resourceUrl)
-  ps1.addPermission(aliceWebId, acl.READ)
+  ps1.addMode(aliceWebId, acl.READ)
   let ps2 = new PermissionSet(resourceUrl)
   t.notOk(ps1.equals(ps2))
-  ps2.addPermission(aliceWebId, acl.READ)
+  ps2.addMode(aliceWebId, acl.READ)
   t.ok(ps1.equals(ps2))
   t.end()
 })
