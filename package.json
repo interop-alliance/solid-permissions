@@ -1,6 +1,6 @@
 {
   "name": "@interop/solid-permissions",
-  "version": "0.9.1",
+  "version": "0.10.0",
   "description": "Web Access Control based permissions library",
   "main": "./src/index",
   "files": [
