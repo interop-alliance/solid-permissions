@@ -6,6 +6,7 @@
  */
 
 const vocab = require('solid-namespace')
+const crypto = require('crypto');
 const { acl } = require('./modes')
 const GroupListing = require('./group-listing')
 
@@ -376,7 +377,7 @@ class Permission {
     if (this.equals(other)) {
       return
     }
-    if (this.hashFragment() !== other.hashFragment()) {
+    if (this.id !== other.id) {
       throw new Error('Cannot merge permissions with different agent id or resource url (accessTo)')
     }
     for (const accessMode of other.allModes()) {
@@ -415,25 +416,28 @@ class Permission {
     if (this.virtual) {
       return []
     }
-    const fragment = rdf.namedNode(this.resourceUrl + '#' + this.hashFragment())
+    const subject = rdf.namedNode(this.resourceUrl + '#' + this.hashFragment())
     const ns = vocab(rdf)
 
     const statements = [
-      rdf.triple(fragment, ns.rdf('type'), ns.acl('Authorization')),
-      rdf.triple(fragment, ns.acl('accessTo'), rdf.namedNode(this.resourceUrl))
+      rdf.triple(subject, ns.rdf('type'), ns.acl('Authorization'))
     ].concat(
-      this.agent.rdfStatements({ fragment, rdf })
+      this.agent.rdfStatements({ fragment: subject, rdf })
     )
-
-    for (const accessMode of this.allModes()) {
-      statements.push(
-        rdf.triple(fragment, ns.acl('mode'), rdf.namedNode(accessMode))
-      )
-    }
 
     if (this.inherit) {
       statements.push(
-        rdf.triple(fragment, ns.acl('default'), rdf.namedNode(this.resourceUrl))
+        rdf.triple(subject, ns.acl('default'), rdf.namedNode(this.resourceUrl))
+      )
+    } else {
+      statements.push(
+        rdf.triple(subject, ns.acl('accessTo'), rdf.namedNode(this.resourceUrl))
+      )
+    }
+
+    for (const accessMode of this.allModes()) {
+      statements.push(
+        rdf.triple(subject, ns.acl('mode'), rdf.namedNode(accessMode))
       )
     }
 
@@ -441,30 +445,49 @@ class Permission {
   }
 
   /**
-   * Returns a hashed combination of agent/group webId and resourceUrl. Used
-   * internally as a key to store this permission in a PermissionSet.
-   * @method hashFragment
-   * @private
-   * @throws {Error} Errors if either the webId or the resourceUrl are not set.
-   * @return {String} hash({webId}-{resourceUrl})
+   * Returns an id based on a combination of agent/group webId and resourceUrl.
+   * Used internally as a key to store this permission in a PermissionSet.
+   *
+   * @throws {Error} Errors if either the agent or the resourceUrl are not set.
+   *
+   * @return {string}
+   */
+  get id () {
+    if (!this.agent || !this.agent.id || !this.resourceUrl) {
+      throw new Error('This permission is incomplete, no id yet.')
+    }
+
+    return Permission.idFor(this.agent.id, this.resourceUrl, this.accessType)
+  }
+
+  /**
+   * Returns a hashed combination of agent/group webId and resourceUrl.
+   *
+   * (This is not required to be crypto-secure, it's just for a convenient url
+   * fragment, so using md5 is ok in this case.)
+   *
+   * @throws {Error} Errors if either the agent or the resourceUrl are not set.
+   *
+   * @return {string}
    */
   hashFragment () {
-    if (!this.agent || !this.agent.id || !this.resourceUrl) {
-      throw new Error('Cannot call hashFragment() on an incomplete permission')
-    }
-    return Permission.hashFragmentFor(this.agent.id, this.resourceUrl, this.accessType)
+    // return this.id
+    return crypto.createHash('md5').update(this.id).digest('hex')
   }
 
   /**
    * Utility method that creates a hash fragment key for this permission.
    * Used with graph serialization to RDF, and as a key to store permissions
    * in a PermissionSet. Exported (mainly for use in PermissionSet).
+   *
+   *
+   *
    * @param webId {string} Agent or group web id
    * @param resourceUrl {string} Resource or container URL for this permission
    * @param [accessType='accessTo'] {string} Either 'accessTo' or 'default'
    * @returns {string}
    */
-  static hashFragmentFor (webId, resourceUrl, accessType = acl.ACCESS_TO) {
+  static idFor (webId, resourceUrl, accessType = acl.ACCESS_TO) {
     return webId + '-' + resourceUrl + '-' + accessType
   }
 }
@@ -635,7 +658,7 @@ class OldPermission {
   /**
    * Returns whether this permission is for a container and should be inherited
    * (that is, contain `acl:default`).
-   * This is a helper function (instead of the raw attribute) to match the rest
+   * This is a helper function (instead of a raw attribute) to match the rest
    * of the api.
    * @method isInherited
    * @return {Boolean}
