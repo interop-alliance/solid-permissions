@@ -5,7 +5,6 @@ chai.use(require('dirty-chai'))
 const { expect } = chai
 chai.should()
 
-const sinon = require('sinon')
 const rdf = require('rdflib')
 const { Permission, Everyone } = require('../../src/permission')
 const { acl } = require('../../src/modes')
@@ -14,8 +13,8 @@ const { PermissionSet } = require('../../src/permission-set')
 const resourceUrl = 'https://alice.example.com/docs/file1'
 const aclUrl = 'https://alice.example.com/docs/file1.acl'
 
-const groupListingSource = require('../resources/group-listing-ttl')
-const listingUrl = 'https://alice.example.com/work-groups'
+// const groupListingSource = require('../resources/group-listing-ttl')
+// const listingUrl = 'https://alice.example.com/work-groups'
 // const groupUrl = listingUrl + '#Accounting'
 
 const bobWebId = 'https://bob.example.com/#me'
@@ -24,11 +23,11 @@ const aliceWebId = 'https://alice.example.com/#me'
 const { parseGraph } = require('./utils')
 
 const rawAclSource = require('../resources/acl-container-ttl')
-let parsedAclGraph, parsedAclGraph2, parsedGroupListing
+let parsedAclGraph, parsedAclGraph2 // parsedGroupListing
 
 before(async () => {
   parsedAclGraph = await parseGraph(rdf, aclUrl, rawAclSource)
-  parsedGroupListing = await parseGraph(rdf, listingUrl, groupListingSource)
+  // parsedGroupListing = await parseGraph(rdf, listingUrl, groupListingSource)
 })
 
 describe('PermissionSet', () => {
@@ -125,7 +124,7 @@ describe('PermissionSet', () => {
     it('should check for Append access', async () => {
       const ps = new PermissionSet({ resourceUrl })
 
-      ps.addMode({agentId: aliceWebId, accessMode: acl.WRITE})
+      ps.addMode({ agentId: aliceWebId, accessMode: acl.WRITE })
 
       const result = await ps.checkAccess(resourceUrl, aliceWebId, acl.APPEND)
       expect(result).to.be.true('Alice should have Append access implied by Write access')
@@ -134,7 +133,7 @@ describe('PermissionSet', () => {
     it('should check for accessTo resource', async () => {
       const containerUrl = 'https://alice.example.com/docs/'
       const ps = new PermissionSet({ resourceUrl: containerUrl })
-      ps.addMode({agentId: aliceWebId, accessMode: [acl.READ, acl.WRITE]})
+      ps.addMode({ agentId: aliceWebId, accessMode: [acl.READ, acl.WRITE] })
 
       const result = await ps.checkAccess(containerUrl, aliceWebId, acl.WRITE)
       expect(result).to.be.true('Alice should have write access to container')
@@ -148,7 +147,7 @@ describe('PermissionSet', () => {
       const ps = new PermissionSet({ resourceUrl: containerUrl, isContainer: true })
 
       // Now add a default / inherited permission for the container
-      ps.addMode({agentId: aliceWebId, accessMode: acl.READ})
+      ps.addMode({ agentId: aliceWebId, accessMode: acl.READ })
 
       const resourceUrl = 'https://alice.example.com/docs/file1'
       const result = await ps.checkAccess(resourceUrl, aliceWebId, acl.READ)
@@ -177,7 +176,6 @@ describe('PermissionSet', () => {
       expect(await ps.checkAccess(resourceUrl, randomUser, acl.READ))
         .to.be.true('Everyone should have inherited read access to file')
 
-
       // Reset the permission set, test a non-default permission
       const set2 = new PermissionSet({ resourceUrl, isContainer: false })
       const permission2 = new Permission({
@@ -197,7 +195,7 @@ describe('PermissionSet', () => {
     it('should add and remove modes', async () => {
       const ps = new PermissionSet({ resourceUrl })
 
-      ps.addMode({agentId: aliceWebId, accessMode: [acl.READ, acl.WRITE]})
+      ps.addMode({ agentId: aliceWebId, accessMode: [acl.READ, acl.WRITE] })
 
       expect(await ps.checkAccess(resourceUrl, aliceWebId, acl.WRITE))
         .to.be.true()
@@ -211,7 +209,7 @@ describe('PermissionSet', () => {
     it('should remove whole permissions', async () => {
       const ps = new PermissionSet({ resourceUrl })
 
-      ps.addMode({agentId: aliceWebId, accessMode: [acl.READ, acl.WRITE]})
+      ps.addMode({ agentId: aliceWebId, accessMode: [acl.READ, acl.WRITE] })
 
       expect(await ps.checkAccess(resourceUrl, aliceWebId, acl.WRITE))
         .to.be.true()
@@ -253,4 +251,3 @@ describe('PermissionSet', () => {
   // //       t.ok(hasAccess, 'Bob should have access as member of group')
   // })
 })
-

@@ -9,7 +9,7 @@
   "scripts": {
     "preversion": "npm test",
     "postversion": "git push --follow-tags",
-    "standard": "standard src/ test/",
+    "standard": "standard --fix src/ test/",
     "test": "npm run standard && npm run mocha",
     "mocha": "mocha test/**/*.spec.js",
     "nyc": "nyc --reporter=html mocha test/**/*.spec.js"
@@ -38,20 +38,27 @@
   },
   "homepage": "https://github.com/solid/solid-permissions",
   "dependencies": {
-    "debug": "^4.1.1",
-    "solid-namespace": "0.3.0"
+    "debug": "^4.3.1",
+    "solid-namespace": "0.5.0"
   },
   "devDependencies": {
     "chai": "^4.2.0",
     "dirty-chai": "^2.0.1",
-    "mocha": "^7.0.1",
-    "nyc": "^15.0.0",
+    "mocha": "^8.2.1",
+    "nyc": "^15.1.0",
     "rdflib": "interop-alliance/rdflib-lite#rc2.0.0",
-    "sinon": "^8.1.1",
+    "sinon": "^9.2.2",
     "solid-web-client": "0.3.2",
-    "standard": "^14.3.1"
+    "standard": "^16.0.3"
   },
   "standard": {
-    "globals": []
+    "globals": [
+      "after",
+      "afterEach",
+      "before",
+      "beforeEach",
+      "describe",
+      "it"
+    ]
   }
 }

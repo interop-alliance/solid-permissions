@@ -6,9 +6,9 @@
  */
 
 const vocab = require('solid-namespace')
-const crypto = require('crypto');
+const crypto = require('crypto')
 const { acl } = require('./modes')
-const GroupListing = require('./group-listing')
+// const GroupListing = require('./group-listing')
 
 class Agent {
   get id () {
@@ -68,7 +68,7 @@ class SingleAgent extends Agent {
       agent = agent.object.value
     }
     if (agent.startsWith('mailto:')) {
-      agent = agent.split(':')[ 1 ]
+      agent = agent.split(':')[1]
     }
     this.mailto.push(agent)
     this.mailto.sort()
@@ -249,7 +249,7 @@ class Permission {
    */
   addMode (accessMode) {
     if (Array.isArray(accessMode) || accessMode instanceof Set) {
-      for (let mode of accessMode) {
+      for (const mode of accessMode) {
         this.addModeSingle(mode)
       }
     } else {
@@ -490,259 +490,6 @@ class Permission {
   static idFor (webId, resourceUrl, accessType = acl.ACCESS_TO) {
     return webId + '-' + resourceUrl + '-' + accessType
   }
-}
-
-class OldPermission {
-  /**
-   * @param resourceUrl {String} URL of the resource (`acl:accessTo`) for which
-   *   this permission is intended.
-   * @param [inherited=false] {Boolean} Should this permission be inherited (contain
-   *   `acl:default`). Used for container ACLs.
-   * @constructor
-   */
-  // constructor (resourceUrl, inherited = false) {
-  //   /**
-  //    * Hashmap of all of the access modes (`acl:Write` etc) granted to an agent
-  //    * or group in this permission. Modified via `addMode()` and `removeMode()`
-  //    * @property accessModes
-  //    * @type {Object}
-  //    */
-  //   this.accessModes = new Set()
-  //   /**
-  //    * Type of permission, either for a specific resource ('accessTo'),
-  //    * or to be inherited by all downstream resources ('default')
-  //    * @property accessType
-  //    * @type {String} Either 'accessTo' or 'default'
-  //    */
-  //   this.accessType = inherited
-  //     ? acl.DEFAULT
-  //     : acl.ACCESS_TO
-  //   /**
-  //    * URL of an agent's WebID (`acl:agent`). Inside an permission, mutually
-  //    * exclusive with the `group` property. Set via `setAgent()`.
-  //    * @property agent
-  //    * @type {String}
-  //    */
-  //   this.agent = null
-  //   /**
-  //    * URL of a group resource (`acl:agentGroup` or `acl:agentClass`). Inside an
-  //    * permission, mutually exclusive with the `agent` property.
-  //    * Set via `setGroup()`.
-  //    * @property group
-  //    * @type {String}
-  //    */
-  //   this.group = null
-  //   /**
-  //    * Does this permission apply to the contents of a container?
-  //    * (`acl:default`). Not used with non-container resources.
-  //    * @property inherited
-  //    * @type {Boolean}
-  //    */
-  //   this.inherited = inherited
-  //   /**
-  //    * Stores the `mailto:` aliases for a given agent. Semi-unofficial
-  //    * functionality, used to store a user's email in the root storage .acl,
-  //    * to use for account recovery etc.
-  //    * @property mailTo
-  //    * @type {Array<String>}
-  //    */
-  //   this.mailTo = []
-  //   /**
-  //    * Hashmap of which origins (http Origin: header) are allowed access to this
-  //    * resource.
-  //    * @property originsAllowed
-  //    * @type {Object}
-  //    */
-  //   // this.originsAllowed = {}
-  //   /**
-  //    * URL of the resource for which this permission applies. (`acl:accessTo`)
-  //    * @property resourceUrl
-  //    * @type {String}
-  //    */
-  //   this.resourceUrl = resourceUrl
-  //   /**
-  //    * Should this permission be serialized? (When writing back to an ACL
-  //    * resource, for example.) Used for implied (rather than explicit)
-  //    * permission, such as ones that are derived from acl:Control statements.
-  //    * @property virtual
-  //    * @type {Boolean}
-  //    */
-  //   this.virtual = false
-  // }
-
-  /**
-   * Adds one or more allowed origins (`acl:origin` statements) to this
-   * permission.
-   * @method addOrigin
-   * @param origin {String|Statement|Array<String>|Array<Statement>} One or
-   *   more origins, each as either a uri, or an RDF statement.
-   * @return {Permission} Returns self, chainable.
-   */
-  // addOrigin (origin) {
-  //   if (!origin) {
-  //     return this
-  //   }
-  //   if (Array.isArray(origin)) {
-  //     if (origin.length > 0) {
-	// origin.forEach((ea) => {
-  //         this.addOriginSingle(ea)
-	// })
-  //     }
-  //   } else {
-  //     this.addOriginSingle(origin)
-  //   }
-  //   return this
-  // }
-
-  /**
-   * Adds a single allowed origin. Internal function, used by `addOrigin()`.
-   * @method addOriginSingle
-   * @private
-   * @param origin {String|Statement} Allowed origin as either a uri, or an RDF
-   *   statement.
-   */
-  // addOriginSingle (origin) {
-  //   if (typeof origin !== 'string') {
-  //     origin = origin.object.value
-  //   }
-  //   this.originsAllowed[ origin ] = true
-  //   return this
-  // }
-
-  /**
-   * Returns a list of all allowed origins for this permission.
-   * @method allOrigins
-   * @return {Array<String>}
-   */
-  // allOrigins () {
-  //   return Object.keys(this.originsAllowed)
-  // }
-
-  /**
-   * Does this permission grant access to requests coming from given origin?
-   * @method allowsOrigin
-   * @param origin {String}
-   * @return {Boolean}
-   */
-  // allowsOrigin (origin) {
-  //   return origin in this.originsAllowed
-  // }
-
-  /**
-   * Returns whether or not this permission is for an agent (vs a group).
-   * @method isAgent
-   * @return {Boolean} Truthy value if agent is set
-   */
-  // isAgent () {
-  //   return this.agent
-  // }
-
-  /**
-   * Is this permission intended for the foaf:Agent group (that is, everyone)?
-   * @method isPublic
-   * @return {Boolean}
-   */
-  isPublic () {
-    return this.group === acl.EVERYONE
-  }
-
-  /**
-   * Returns whether or not this permission is for a group (vs an agent).
-   * @method isGroup
-   * @return {Boolean} Truthy value if group is set
-   */
-  isGroup () {
-    return this.group
-  }
-
-  /**
-   * Returns whether this permission is for a container and should be inherited
-   * (that is, contain `acl:default`).
-   * This is a helper function (instead of a raw attribute) to match the rest
-   * of the api.
-   * @method isInherited
-   * @return {Boolean}
-   */
-  isInherited () {
-    return this.inherited
-  }
-
-  /**
-   * Removes one or more allowed origins from this permission.
-   * @method removeOrigin
-   * @param origin {String|Statement|Array<String>|Array<Statement>} URL
-   *   representation of the access mode, or an RDF `acl:mode` triple.
-   * @returns {removeMode}
-   */
-  // removeOrigin (origin) {
-  //   if (Array.isArray(origin)) {
-  //     origin.forEach((ea) => {
-  //       this.removeOriginSingle(ea)
-  //     })
-  //   } else {
-  //     this.removeOriginSingle(origin)
-  //   }
-  //   return this
-  // }
-
-  /**
-   * Removes a single allowed origin from this permission. Internal use only
-   * (used by `removeOrigin()`).
-   * @method removeOriginSingle
-   * @private
-   * @param origin {String|Statement} URI or RDF statement
-   */
-  // removeOriginSingle (origin) {
-  //   if (typeof origin !== 'string') {
-  //     origin = origin.object.value
-  //   }
-  //   delete this.originsAllowed[ origin ]
-  // }
-
-  /**
-   * Sets the agent WebID for this permission.
-   * @method setAgent
-   * @param agent {string|Quad|GroupListing} Agent URL (or `acl:agent` RDF triple).
-   */
-  setAgent (agent) {
-    if (agent instanceof GroupListing) {
-      return this.setGroup(agent)
-    }
-    if (typeof agent !== 'string') {
-      // This is an RDF statement
-      agent = agent.object.value
-    }
-    if (agent === acl.EVERYONE) {
-      this.setPublic()
-    } else if (this.group) {
-      throw new Error('Cannot set agent, permission already has a group set')
-    }
-    if (agent.startsWith('mailto:')) {
-      this.addMailTo(agent)
-    } else {
-      this.agent = agent
-    }
-  }
-
-  /**
-   * Sets the group WebID for this permission.
-   * @method setGroup
-   * @param group {string|Triple|GroupListing} Group URL (or `acl:agentClass` RDF
-   *   triple).
-   */
-  // setGroup (group) {
-  //   if (this.agent) {
-  //     throw new Error('Cannot set group, permission already has an agent set')
-  //   }
-  //   if (group instanceof GroupListing) {
-  //     group = group.listing
-  //   }
-  //   if (typeof group !== 'string') {
-  //     // This is an RDF statement
-  //     group = group.object.value
-  //   }
-  //   this.group = group
-  // }
 }
 
 module.exports = {

@@ -23,7 +23,7 @@ const groupWebId = 'https://devteam.example.com/something'
 const { parseGraph } = require('./utils')
 
 const rawAclSource = require('../resources/acl-container-ttl')
-var parsedAclGraph
+let parsedAclGraph
 
 before('init graph', t => {
   return parseGraph(rdf, aclUrl, rawAclSource)
@@ -37,9 +37,9 @@ before('init graph', t => {
 })
 
 test('PermissionSet can add and remove agent permissions', function (t) {
-  let ps = new PermissionSet(resourceUrl, aclUrl)
+  const ps = new PermissionSet(resourceUrl, aclUrl)
   t.equal(ps.aclUrl, aclUrl)
-  let origin = 'https://example.com/'
+  const origin = 'https://example.com/'
   // Notice that addPermission() is chainable:
   ps
     .addMode(bobWebId, acl.READ, origin) // only allow read from origin
@@ -78,7 +78,7 @@ test('PermissionSet can add and remove agent permissions', function (t) {
 })
 
 test('PermissionSet no duplicate permissions test', function (t) {
-  let ps = new PermissionSet(resourceUrl, aclUrl)
+  const ps = new PermissionSet(resourceUrl, aclUrl)
   // Now add two identical permissions
   ps.addMode(aliceWebId, [acl.READ, acl.WRITE])
   ps.addMode(aliceWebId, [acl.READ, acl.WRITE])
@@ -87,11 +87,11 @@ test('PermissionSet no duplicate permissions test', function (t) {
 })
 
 test('PermissionSet can add and remove group permissions', function (t) {
-  let ps = new PermissionSet(resourceUrl)
+  const ps = new PermissionSet(resourceUrl)
   // Let's add an agentGroup permission
   ps.addGroupPermission(groupWebId, [acl.READ, acl.WRITE])
   t.equal(ps.count, 1)
-  let perm = ps.permissionFor(groupWebId)
+  const perm = ps.permissionFor(groupWebId)
   t.equal(perm.group, groupWebId)
   ps.removeMode(groupWebId, [acl.READ, acl.WRITE])
   t.ok(ps.isEmpty())
@@ -99,7 +99,7 @@ test('PermissionSet can add and remove group permissions', function (t) {
 })
 
 test('iterating over a PermissionSet', function (t) {
-  let ps = new PermissionSet(resourceUrl, aclUrl)
+  const ps = new PermissionSet(resourceUrl, aclUrl)
   ps
     .addMode(bobWebId, acl.READ)
     .addMode(aliceWebId, [acl.READ, acl.WRITE])
@@ -110,22 +110,22 @@ test('iterating over a PermissionSet', function (t) {
 })
 
 test.skip('a PermissionSet() for a container', function (t) {
-  let isContainer = true
-  let ps = new PermissionSet(containerUrl, aclUrl, isContainer)
+  const isContainer = true
+  const ps = new PermissionSet(containerUrl, aclUrl, isContainer)
   t.ok(ps.isPermInherited(),
     'A PermissionSet for a container should be inherited by default')
   ps.addMode(bobWebId, acl.READ)
-  let perm = ps.permissionFor(bobWebId)
+  const perm = ps.permissionFor(bobWebId)
   t.ok(perm.isInherited(),
     'An permission intended for a container should be inherited by default')
   t.end()
 })
 
 test('a PermissionSet() for a resource (not container)', function (t) {
-  let ps = new PermissionSet(containerUrl)
+  const ps = new PermissionSet(containerUrl)
   t.notOk(ps.isPermInherited())
   ps.addMode(bobWebId, acl.READ)
-  let perm = ps.permissionFor(bobWebId)
+  const perm = ps.permissionFor(bobWebId)
   t.notOk(perm.isInherited(),
     'An permission intended for a resource should not be inherited by default')
   t.end()
@@ -136,15 +136,15 @@ test('a PermissionSet can be initialized from an .acl graph', function (t) {
 })
 
 test('PermissionSet equals test 1', function (t) {
-  let ps1 = new PermissionSet()
-  let ps2 = new PermissionSet()
+  const ps1 = new PermissionSet()
+  const ps2 = new PermissionSet()
   t.ok(ps1.equals(ps2))
   t.end()
 })
 
 test('PermissionSet equals test 2', function (t) {
-  let ps1 = new PermissionSet(resourceUrl)
-  let ps2 = new PermissionSet()
+  const ps1 = new PermissionSet(resourceUrl)
+  const ps2 = new PermissionSet()
   t.notOk(ps1.equals(ps2))
   ps2.resourceUrl = resourceUrl
   t.ok(ps1.equals(ps2))
@@ -157,9 +157,9 @@ test('PermissionSet equals test 2', function (t) {
 })
 
 test('PermissionSet equals test 3', function (t) {
-  let ps1 = new PermissionSet(containerUrl, containerAclUrl,
+  const ps1 = new PermissionSet(containerUrl, containerAclUrl,
     PermissionSet.CONTAINER)
-  let ps2 = new PermissionSet(containerUrl, containerAclUrl)
+  const ps2 = new PermissionSet(containerUrl, containerAclUrl)
   t.notOk(ps1.equals(ps2))
   ps2.resourceType = PermissionSet.CONTAINER
   t.ok(ps1.equals(ps2))
@@ -167,9 +167,9 @@ test('PermissionSet equals test 3', function (t) {
 })
 
 test('PermissionSet equals test 4', function (t) {
-  let ps1 = new PermissionSet(resourceUrl)
+  const ps1 = new PermissionSet(resourceUrl)
   ps1.addMode(aliceWebId, acl.READ)
-  let ps2 = new PermissionSet(resourceUrl)
+  const ps2 = new PermissionSet(resourceUrl)
   t.notOk(ps1.equals(ps2))
   ps2.addMode(aliceWebId, acl.READ)
   t.ok(ps1.equals(ps2))
@@ -177,7 +177,7 @@ test('PermissionSet equals test 4', function (t) {
 })
 
 test('PermissionSet serialized & deserialized round trip test', function (t) {
-  var ps = new PermissionSet(containerUrl, containerAclUrl,
+  const ps = new PermissionSet(containerUrl, containerAclUrl,
     PermissionSet.CONTAINER, { graph: parsedAclGraph, rdf })
   // console.log(ps.serialize())
   t.ok(ps.equals(ps), 'A PermissionSet should equal itself')
@@ -189,7 +189,7 @@ test('PermissionSet serialized & deserialized round trip test', function (t) {
       return parseGraph(rdf, containerAclUrl, serializedTurtle)
     })
     .then(parsedGraph => {
-      let ps2 = new PermissionSet(containerUrl, containerAclUrl,
+      const ps2 = new PermissionSet(containerUrl, containerAclUrl,
         PermissionSet.CONTAINER, { graph: parsedGraph, rdf })
       // console.log(ps2.serialize())
       t.ok(ps.equals(ps2),
@@ -203,9 +203,9 @@ test('PermissionSet serialized & deserialized round trip test', function (t) {
 })
 
 test('PermissionSet allowsPublic() test', function (t) {
-  var ps = new PermissionSet(containerUrl, containerAclUrl,
+  const ps = new PermissionSet(containerUrl, containerAclUrl,
     PermissionSet.CONTAINER, { graph: parsedAclGraph, rdf })
-  let otherUrl = 'https://alice.example.com/profile/card'
+  const otherUrl = 'https://alice.example.com/profile/card'
   t.ok(ps.allowsPublic(acl.READ, otherUrl),
     'Alice\'s profile should be public-readable')
   t.notOk(ps.allowsPublic(acl.WRITE, otherUrl),
@@ -213,9 +213,8 @@ test('PermissionSet allowsPublic() test', function (t) {
   t.end()
 })
 
-
 test('PermissionSet serialize() no rdf test', t => {
-  let ps = new PermissionSet()
+  const ps = new PermissionSet()
   ps.serialize()
     .then(() => {
       t.fail('Serialize should not succeed with no rdf lib')
@@ -227,7 +226,7 @@ test('PermissionSet serialize() no rdf test', t => {
 })
 
 test('PermissionSet serialize() rdflib errors test', t => {
-  let ps = new PermissionSet(resourceUrl, aclUrl, false,
+  const ps = new PermissionSet(resourceUrl, aclUrl, false,
     { rdf, graph: parsedAclGraph })
   ps.serialize({ contentType: 'invalid' })
     .then(() => {
@@ -240,14 +239,14 @@ test('PermissionSet serialize() rdflib errors test', t => {
 })
 
 test('PermissionSet save() test', t => {
-  let resourceUrl = 'https://alice.example.com/docs/file1'
-  let aclUrl = 'https://alice.example.com/docs/file1.acl'
-  let isContainer = false
-  let putStub = sinon.stub().returns(Promise.resolve())
-  let mockWebClient = {
+  const resourceUrl = 'https://alice.example.com/docs/file1'
+  const aclUrl = 'https://alice.example.com/docs/file1.acl'
+  const isContainer = false
+  const putStub = sinon.stub().returns(Promise.resolve())
+  const mockWebClient = {
     put: putStub
   }
-  let ps = new PermissionSet(resourceUrl, aclUrl, isContainer,
+  const ps = new PermissionSet(resourceUrl, aclUrl, isContainer,
     { rdf, graph: parsedAclGraph, webClient: mockWebClient })
   let serializedGraph
   ps.serialize()
@@ -268,7 +267,7 @@ test('PermissionSet save() test', t => {
 
 test('PermissionSet save() no aclUrl test', t => {
   let nullAclUrl
-  let ps = new PermissionSet(resourceUrl, nullAclUrl, false,
+  const ps = new PermissionSet(resourceUrl, nullAclUrl, false,
     { rdf, graph: parsedAclGraph })
   ps.save()
     .then(() => {
@@ -281,7 +280,7 @@ test('PermissionSet save() no aclUrl test', t => {
 })
 
 test('PermissionSet save() no web client test', t => {
-  let ps = new PermissionSet(resourceUrl, aclUrl, false,
+  const ps = new PermissionSet(resourceUrl, aclUrl, false,
     { rdf, graph: parsedAclGraph })
   ps.save()
     .then(() => {
@@ -294,18 +293,18 @@ test('PermissionSet save() no web client test', t => {
 })
 
 test('PermissionSet parsing acl with agentGroup', t => {
-  let groupAclSource = require('../resources/acl-with-group-ttl')
-  let resourceUrl = 'https://alice.example.com/docs/file2.ttl'
-  let aclUrl = 'https://alice.example.com/docs/file2.ttl.acl'
-  let groupUrl = 'https://alice.example.com/work-groups#Accounting'
+  const groupAclSource = require('../resources/acl-with-group-ttl')
+  const resourceUrl = 'https://alice.example.com/docs/file2.ttl'
+  const aclUrl = 'https://alice.example.com/docs/file2.ttl.acl'
+  const groupUrl = 'https://alice.example.com/work-groups#Accounting'
 
-  let isContainer = false
-  let ps = new PermissionSet(resourceUrl, aclUrl, isContainer, { rdf })
+  const isContainer = false
+  const ps = new PermissionSet(resourceUrl, aclUrl, isContainer, { rdf })
   parseGraph(rdf, aclUrl, groupAclSource)
     .then(graph => {
       ps.initFromGraph(graph)
       // Check to make sure
-      let perm = ps.findPermByAgent(groupUrl, resourceUrl)
+      const perm = ps.findPermByAgent(groupUrl, resourceUrl)
       t.ok(perm, 'Should have parsed the aclGroup permission')
       t.equals(perm.group, groupUrl, 'Permission should have .group set')
       t.ok(perm.isGroup())
@@ -318,17 +317,17 @@ test('PermissionSet parsing acl with agentGroup', t => {
 })
 
 test('PermissionSet groupUris() test', t => {
-  let resourceUrl = 'https://alice.example.com/docs/file2.ttl'
-  let ps = new PermissionSet(resourceUrl)
+  const resourceUrl = 'https://alice.example.com/docs/file2.ttl'
+  const ps = new PermissionSet(resourceUrl)
   ps.addGroupPermission(acl.EVERYONE, acl.READ)
   // By default, groupUris() excludes the Public agentClass
   t.deepEquals(ps.groupUrls(), [])
   t.notOk(ps.hasGroups())
-  let groupUrl = 'https://alice.example.com/work-groups#Accounting'
+  const groupUrl = 'https://alice.example.com/work-groups#Accounting'
   ps.addGroupPermission(groupUrl, acl.WRITE)
   t.equals(ps.groupUrls().length, 1)
   t.ok(ps.hasGroups())
-  let excludePublic = false
+  const excludePublic = false
   t.equals(ps.groupUrls(excludePublic).length, 2)
   t.end()
 })

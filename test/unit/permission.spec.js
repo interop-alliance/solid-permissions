@@ -43,7 +43,7 @@ describe('Permission', () => {
       const p = new Permission()
       p.addMode([acl.READ, acl.WRITE, acl.CONTROL])
       expect(p.allowsRead() && p.allowsAppend() && p.allowsWrite() &&
-        p.allowsControl()).to.be.true
+        p.allowsControl()).to.be.true()
     })
   })
 
@@ -228,4 +228,3 @@ describe('Permission', () => {
     })
   })
 })
-

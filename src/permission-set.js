@@ -16,7 +16,7 @@
  *     as 'to be inherited', that is will have `acl:default` set.
  */
 
-const { Permission, SingleAgent, Group, Everyone } = require('./permission')
+const { Permission, SingleAgent, Everyone } = require('./permission')
 const GroupListing = require('./group-listing')
 const { acl } = require('./modes')
 const vocab = require('solid-namespace')
@@ -28,8 +28,8 @@ const DEFAULT_CONTENT_TYPE = 'text/turtle'
 /**
  * Resource types, used by PermissionSet objects
  */
-const RESOURCE = 'resource'
-const CONTAINER = 'container'
+// const RESOURCE = 'resource'
+// const CONTAINER = 'container'
 
 /**
  * Agent type index names (used by findPermByAgent() etc)
@@ -54,8 +54,8 @@ class PermissionSet {
     this.rdf = rdf
     this.permissions = permissions
     this.index = index || {
-      'agents': {}, // Permissions by agent webId
-      'groups': {} // Permissions by group webId (also includes Public/EVERYONE)
+      agents: {}, // Permissions by agent webId
+      groups: {} // Permissions by group webId (also includes Public/EVERYONE)
     }
     /**
      * Cache of GroupListing objects, by group webId. Populated by `loadGroups()`.
@@ -163,13 +163,14 @@ class PermissionSet {
    */
   checkGroupAccess (resourceUrl, agentId, accessMode, options = {}) {
     let result = false
-    let membershipMatches = this.groupsForMember(agentId)
+    const membershipMatches = this.groupsForMember(agentId)
     membershipMatches.find(groupWebId => {
-      debug('Looking for access rights for ' + groupWebId)
+      console.log('Looking for access rights for ' + groupWebId)
       if (this.checkAccessForAgent(resourceUrl, groupWebId, accessMode)) {
-        debug('Groups access granted for ' + resourceUrl)
+        console.log('Groups access granted for ' + resourceUrl)
         result = true
       }
+      return result
     })
     return result
   }
@@ -235,7 +236,7 @@ class PermissionSet {
    *
    * @returns {PermissionSet} Returns self (chainable)
    */
-  addMode ({agentId, accessMode, inherit = this.isContainer}) {
+  addMode ({ agentId, accessMode, inherit = this.isContainer }) {
     if (!agentId) {
       throw new Error('addPermission() requires a valid webId.')
     }
@@ -446,7 +447,7 @@ class PermissionSet {
   buildGraph (rdf = this.rdf) {
     const graph = rdf.graph()
     for (const permission of this.allPermissions()) {
-      if(!permission.virtual) {
+      if (!permission.virtual) {
         graph.add(permission.rdfStatements(rdf))
       }
     }
@@ -578,321 +579,6 @@ class PermissionSet {
   }
 }
 
-class OldPermissionSet {
-  /**
-   * @class PermissionSet
-   * @param resourceUrl {String} URL of the resource to which this PS applies
-   * @param aclUrl {String} URL of the ACL corresponding to the resource
-   * @param isContainer {Boolean} Is the resource a container? (Affects usage of
-   *   inherit semantics / acl:default)
-   * @param [options={}] {Object} Options hashmap
-   * @param [options.graph] {Graph} Parsed RDF graph of the ACL resource
-   * @param [options.rdf] {RDF} RDF Library
-   * @param [options.strictOrigin] {Boolean} Enforce strict origin?
-   * @param [options.host] {String} Actual request uri
-   * @param [options.origin] {String} Origin URI to enforce, relevant
-   *   if strictOrigin is set to true
-   * @param [options.webClient] {SolidWebClient} Used for save() and clear()
-   * @param [options.isAcl] {Function}
-   * @param [options.aclUrlFor] {Function}
-   * @constructor
-   */
-  constructor (resourceUrl, aclUrl, isContainer, options = {}) {
-    /**
-     * Hashmap of all Permissions in this permission set, keyed by a hashed
-     * combination of an agent's/group's webId and the resourceUrl.
-     * @property permissions
-     * @type {Object}
-     */
-    this.permissions = {}
-    /**
-     * The URL of the corresponding ACL resource, at which these permissions will
-     * be saved.
-     * @property aclUrl
-     * @type {String}
-     */
-    this.aclUrl = aclUrl
-    /**
-     * Optional request host (used by checkOrigin())
-     * @property host
-     * @type {String}
-     */
-    this.host = options.host
-    /**
-     * Initialize the agents / groups indexes.
-     * For each index type (`agents`, `groups`), permissions are indexed
-     * first by `agentId`, then by access type (direct or inherited), and
-     * lastly by resource. For example:
-     *
-     *   ```
-     *   agents: {
-     *     'https://alice.com/#i': {
-     *       accessTo: {
-     *         'https://alice.com/file1': permission1
-     *       },
-     *       default: {
-     *         'https://alice.com/': permission2
-     *       }
-     *     }
-     *   }
-     *   ```
-     * @property permsBy
-     * @type {Object}
-     */
-    this.permsBy = {
-      'agents': {}, // Perms by agent webId
-      'groups': {} // Perms by group webId (also includes Public / EVERYONE)
-    }
-    /**
-     * Cache of GroupListing objects, by group webId. Populated by `loadGroups()`.
-     * @property groups
-     * @type {Object}
-     */
-    this.groups = {}
-    /**
-     * RDF Library (optionally injected)
-     * @property rdf
-     * @type {RDF}
-     */
-    this.rdf = options.rdf
-    /**
-     * Whether this permission set is for a 'container' or a 'resource'.
-     * Determines whether or not the inherit/'acl:default' attribute is set on
-     * all its Permissions.
-     * @property resourceType
-     * @type {String}
-     */
-    this.resourceType = isContainer ? CONTAINER : RESOURCE
-    /**
-     * The URL of the resource for which these permissions apply.
-     * @property resourceUrl
-     * @type {String}
-     */
-    this.resourceUrl = resourceUrl
-    /**
-     * Should this permission set enforce "strict origin" policy?
-     * (If true, uses `options.origin` parameter)
-     * @property strictOrigin
-     * @type {Boolean}
-     */
-    this.strictOrigin = options.strictOrigin
-    /**
-     * Contents of the request's `Origin:` header.
-     * (used only if `strictOrigin` parameter is set to true)
-     * @property origin
-     * @type {String}
-     */
-    this.origin = options.origin
-    /**
-     * Solid REST client (optionally injected), used by save() and clear().
-     * @type {SolidWebClient}
-     */
-    this.webClient = options.webClient
-
-    // Init the functions for deriving an ACL url for a given resource
-    this.aclUrlFor = options.aclUrlFor ? options.aclUrlFor : aclUrlFor
-    this.aclUrlFor.bind(this)
-    this.isAcl = options.isAcl ? options.isAcl : isAcl
-    this.isAcl.bind(this)
-
-    // Optionally initialize from a given parsed graph
-    if (options.graph) {
-      this.initFromGraph(options.graph)
-    }
-  }
-
-  /**
-   * Creates an Permission with the given parameters, and passes it on to
-   * `addPermission()` to be added to this PermissionSet.
-   * Essentially a convenience factory method.
-   * @method addPermissionFor
-   * @private
-   * @param resourceUrl {String}
-   * @param inherit {Boolean}
-   * @param agent {string|Quad|GroupListing} Agent URL (or `acl:agent` RDF triple).
-   * @param [accessModes=[]] {string|NamedNode|Array} 'READ'/'WRITE' etc.
-   * @param [origins=[]] {Array<String>} List of origins that are allowed access
-   * @param [mailTos=[]] {Array<String>}
-   * @return {PermissionSet} Returns self, chainable
-   */
-  addPermissionFor (resourceUrl, inherit, agent, accessModes = [],
-    origins = [], mailTos = []) {
-    let perm = new Permission(resourceUrl, inherit)
-    if (agent instanceof GroupListing) {
-      perm.setGroup(agent.listing)
-    } else {
-      perm.setAgent(agent)
-    }
-    perm.addMode(accessModes)
-    perm.addOrigin(origins)
-    mailTos.forEach(mailTo => {
-      perm.addMailTo(mailTo)
-    })
-    this.addSinglePermission(perm)
-    return this
-  }
-
-  /**
-   * Adds a group permission for the given access mode and group web id.
-   * @method addGroupPermission
-   * @param webId {String}
-   * @param accessMode {String|Array<String>}
-   * @return {PermissionSet} Returns self (chainable)
-   */
-  addGroupPermission (webId, accessMode) {
-    if (!this.resourceUrl) {
-      throw new Error('Cannot add a permission to a PermissionSet with no resourceUrl')
-    }
-    var perm = new Permission(this.resourceUrl, this.isPermInherited())
-    perm.setGroup(webId)
-    perm.addMode(accessMode)
-    this.addSinglePermission(perm)
-    return this
-  }
-
-  /**
-   * Tests whether a given permission allows operations from the current
-   * request's `Origin` header. (The current request's origin and host are
-   * passed in as options to the PermissionSet's constructor.)
-   * @param permission {Permission}
-   * @return {Boolean}
-   */
-  checkOrigin (permission) {
-    if (!this.strictOrigin || // Enforcement turned off in server config
-        !this.origin || // No origin - not a script, do not enforce origin
-        this.origin === this.host) { // same origin is trusted
-      return true
-    }
-    // If not same origin, check that the origin is in the explicit ACL list
-    return permission.allowsOrigin(this.origin)
-  }
-
-  /**
-   * Sends a delete request to a particular ACL resource. Intended to be used for
-   * an existing loaded PermissionSet, but you can also specify a particular
-   * URL to delete.
-   * Usage:
-   *
-   *   ```
-   *   // If you have an existing PermissionSet as a result of `getPermissions()`:
-   *   solid.getPermissions('https://www.example.com/file1')
-   *     .then(function (permissionSet) {
-   *       // do stuff
-   *       return permissionSet.clear()  // deletes that permissionSet
-   *     })
-   *   // Otherwise, use the helper function
-   *   //   solid.clearPermissions(resourceUrl) instead
-   *   solid.clearPermissions('https://www.example.com/file1')
-   *     .then(function (response) {
-   *       // file1.acl is now deleted
-   *     })
-   *   ```
-   * @method clear
-   * @param [webClient] {SolidWebClient}
-   * @throws {Error} Rejects with an error if it doesn't know where to delete, or
-   *   with any XHR errors that crop up.
-   * @return {Promise<Request>}
-   */
-  clear (webClient) {
-    webClient = webClient || this.webClient
-    if (!webClient) {
-      return Promise.reject(new Error('Cannot clear - no web client'))
-    }
-    var aclUrl = this.aclUrl
-    if (!aclUrl) {
-      return Promise.reject(new Error('Cannot clear - unknown target url'))
-    }
-    return webClient.del(aclUrl)
-  }
-
-  /**
-   * Returns whether or not this permission set is equal to another one.
-   * A PermissionSet is considered equal to another one iff:
-   * - It has the same number of permissions, and each of those permissions
-   *   has a corresponding one in the other set
-   * - They are both intended for the same resource (have the same resourceUrl)
-   * - They are both intended to be saved at the same aclUrl
-   * @method equals
-   * @param ps {PermissionSet} The other permission set to compare to
-   * @return {Boolean}
-   */
-  equals (ps) {
-    var sameUrl = this.resourceUrl === ps.resourceUrl
-    var sameAclUrl = this.aclUrl === ps.aclUrl
-    var sameResourceType = this.resourceType === ps.resourceType
-    var myPermKeys = Object.keys(this.permissions)
-    var otherPermKeys = Object.keys(ps.permissions)
-    if (myPermKeys.length !== otherPermKeys.length) { return false }
-    var samePerms = true
-    var myPerm, otherPerm
-    myPermKeys.forEach(permKey => {
-      myPerm = this.permissions[permKey]
-      otherPerm = ps.permissions[permKey]
-      if (!otherPerm) {
-        samePerms = false
-      }
-      if (!myPerm.equals(otherPerm)) {
-        samePerms = false
-      }
-    })
-    return sameUrl && sameAclUrl && sameResourceType && samePerms
-  }
-
-  /**
-   * Returns whether or not permissions added to this permission set be
-   * inherited, by default? (That is, should they have acl:default set on them).
-   * @method isPermInherited
-   * @return {Boolean}
-   */
-  isPermInherited () {
-    return this.resourceType === CONTAINER
-  }
-
-  /**
-   * Returns the corresponding Permission for a given agent/group webId (and
-   * for a given resourceUrl, although it assumes by default that it's the same
-   * resourceUrl as the PermissionSet).
-   *
-   * @param webId {String} URL of the agent or group
-   * @param [resourceUrl] {String}
-   * @return {Permission} Returns the corresponding Permission, or `null`
-   *   if no webId is given, or if no such permission exists.
-   */
-  permissionFor (webId, resourceUrl) {
-    if (!webId) {
-      return null
-    }
-    resourceUrl = resourceUrl || this.resourceUrl
-    const id = Permission.idFor(webId, resourceUrl)
-    return this.permissions[id]
-  }
-
-  /**
-   * @method save
-   * @param [options={}] {Object} Options hashmap
-   * @param [options.aclUrl] {String} Optional URL to save the .ACL resource to.
-   *   Defaults to its pre-set `aclUrl`, if not explicitly passed in.
-   * @param [options.contentType] {string} Optional content type to serialize as
-   * @throws {Error} Rejects with an error if it doesn't know where to save, or
-   *   with any XHR errors that crop up.
-   * @return {Promise<SolidResponse>}
-   */
-  save (options = {}) {
-    let aclUrl = options.aclUrl || this.aclUrl
-    let contentType = options.contentType || DEFAULT_CONTENT_TYPE
-    if (!aclUrl) {
-      return Promise.reject(new Error('Cannot save - unknown target url'))
-    }
-    if (!this.webClient) {
-      return Promise.reject(new Error('Cannot save - no web client'))
-    }
-    return this.serialize({ contentType })
-      .then(graph => {
-        return this.webClient.put(aclUrl, graph, contentType)
-      })
-  }
-}
-
 /**
  * Returns the corresponding ACL url, for a given resource.
  * This is the default template for the `aclUrlFor()` method that's used by
@@ -940,8 +626,5 @@ function isMailTo (agent) {
 module.exports = {
   PermissionSet,
   isAcl,
-  aclUrlFor,
-  isMailTo
+  aclUrlFor
 }
-
-

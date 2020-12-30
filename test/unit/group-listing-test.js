@@ -13,15 +13,15 @@ const groupListingSource = require('../resources/group-listing-ttl')
 const listingUri = 'https://example.com/groups'
 
 test('GroupListing empty group test', t => {
-  let group = new GroupListing()
+  const group = new GroupListing()
   t.equals(group.count, 0, 'A new group should have no members')
   t.notOk(group.uid, 'A new group should have no group UID')
   t.end()
 })
 
 test('GroupListing addMember test', t => {
-  let group = new GroupListing()
-  let bobWebId = 'https://bob.com/#i'
+  const group = new GroupListing()
+  const bobWebId = 'https://bob.com/#i'
   group.addMember(bobWebId)
   t.equals(group.count, 1)
   t.ok(group.hasMember(bobWebId))
@@ -29,9 +29,9 @@ test('GroupListing addMember test', t => {
 })
 
 test('GroupListing initFromGraph()', t => {
-  let group = new GroupListing({ listing: listingUri })
+  const group = new GroupListing({ listing: listingUri })
   t.equals(group.listing, listingUri)
-  let groupUri = listingUri + '#Accounting'
+  const groupUri = listingUri + '#Accounting'
 
   parseGraph(rdf, listingUri, groupListingSource)
     .then(graph => {
@@ -48,10 +48,10 @@ test('GroupListing initFromGraph()', t => {
 })
 
 test('GroupListing.loadFrom test', t => {
-  let groupUri = listingUri + '#Accounting'
-  let fetchGraph = sinon.stub()
+  const groupUri = listingUri + '#Accounting'
+  const fetchGraph = sinon.stub()
     .returns(parseGraph(rdf, listingUri, groupListingSource))
-  let options = {}
+  const options = {}
   GroupListing.loadFrom(groupUri, fetchGraph, rdf, options)
     .then(group => {
       t.equals(group.count, 2, 'Two members should have been parsed')

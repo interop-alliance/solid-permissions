@@ -12,7 +12,7 @@ const WRITE = ns.acl('Write')
 const APPEND = ns.acl('Append')
 const CONTROL = ns.acl('Control')
 const EVERYONE = ns.foaf('Agent')
-const ALL_MODES = [ READ, WRITE, CONTROL ]
+const ALL_MODES = [READ, WRITE, CONTROL]
 
 // ACL-related convenience constants
 const INHERIT = true
